@@ -11,7 +11,6 @@ import { Sparkles, Banana, Settings2, Check, ChevronDown, ChevronUp, GripVertica
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { OpenAIIcon, GoogleIcon, KlingIcon, HailuoIcon } from '../icons/BrandIcons';
 import { useFaceDetection } from '../../hooks/useFaceDetection';
-import { ChangeAnglePanel } from './ChangeAnglePanel';
 import { LocalModel, getLocalModels } from '../../services/localModelService';
 
 interface NodeControlsProps {
@@ -22,7 +21,6 @@ interface NodeControlsProps {
     connectedImageNodes?: { id: string; url: string; type?: NodeType }[]; // Connected parent nodes
     onUpdate: (id: string, updates: Partial<NodeData>) => void;
     onGenerate: (id: string) => void;
-    onChangeAngleGenerate?: (nodeId: string) => void;
     onSelect: (id: string) => void;
     zoom: number;
     canvasTheme?: 'dark' | 'light';
@@ -49,9 +47,10 @@ const VIDEO_DURATIONS = [5, 6, 8, 10];
 const VIDEO_ASPECT_RATIOS = ["16:9", "9:16"];
 
 const VIDEO_MODELS = [
+    { id: 'seedance-2-0-mini', name: 'Seedance 2.0 Mini', provider: 'bytedance', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     { id: 'veo-3.1', name: 'Veo 3.1', provider: 'google', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [4, 6, 8], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     // Kling AI models - Consolidated: removed legacy v1, v1-5, v1-6, v2-master
-    { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
+    { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     { id: 'kling-v2-1-master', name: 'Kling V2.1 Master', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     { id: 'kling-v2-5-turbo', name: 'Kling V2.5 Turbo', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
     { id: 'kling-v2-6', name: 'Kling 2.6 (Motion)', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
@@ -70,12 +69,21 @@ const VIDEO_MODELS = [
 // aspectRatios: Supported aspect ratios for the model
 const IMAGE_MODELS = [
     {
+        id: 'gpt-image-2',
+        name: 'GPT Image 2',
+        provider: 'openai',
+        supportsImageToImage: true,
+        supportsMultiImage: true,
+        recommended: true,
+        resolutions: ["Auto", "1K", "2K", "4K"],
+        aspectRatios: ["Auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "21:9"]
+    },
+    {
         id: 'gpt-image-1.5',
         name: 'GPT Image 1.5',
         provider: 'openai',
         supportsImageToImage: true,
         supportsMultiImage: true,
-        recommended: true,
         resolutions: ["Auto", "1K", "2K", "4K"],
         // OpenAI uses exact pixel sizes, not aspect ratios
         aspectRatios: ["Auto", "1024x1024", "1536x1024", "1024x1536"]
@@ -170,7 +178,6 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     connectedImageNodes = [],
     onUpdate,
     onGenerate,
-    onChangeAngleGenerate,
     onSelect,
     zoom,
     canvasTheme = 'dark'
@@ -290,7 +297,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     useEffect(() => {
         if (data.type === NodeType.VIDEO) {
             const shouldAutoExpand = connectedImageNodes.length >= 2 ||
-                (data.videoModel === 'kling-v2-6' && connectedImageNodes.length > 0);
+                (['kling-v2-6', 'seedance-2-0-mini'].includes(data.videoModel || '') && connectedImageNodes.length > 0);
             if (shouldAutoExpand) {
                 setShowAdvanced(true);
             }
@@ -360,7 +367,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
 
     const currentSizeLabel = (data.type === NodeType.VIDEO || data.type === NodeType.LOCAL_VIDEO_MODEL)
         ? (data.resolution || "Auto")
-        : (data.aspectRatio || "Auto");
+        : (data.aspectRatio || "9:16");
 
     // For image nodes, use model-specific aspect ratios (sizeOptions for video computed later with availableResolutions)
     const currentImageModelForRatios = IMAGE_MODELS.find(m => m.id === data.imageModel) || IMAGE_MODELS[0];
@@ -556,38 +563,6 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     // Theme helper
     const isDark = canvasTheme === 'dark';
 
-    // Handle angle mode generate - creates a new connected node
-    const handleAngleGenerate = () => {
-        if (onChangeAngleGenerate) {
-            onChangeAngleGenerate(data.id);
-        }
-    };
-
-    // If in angle mode for Image nodes with result, show ChangeAnglePanel
-    if (data.angleMode && data.type === NodeType.IMAGE && isSuccess && data.resultUrl) {
-        return (
-            <div
-                style={{
-                    transform: `scale(${localScale})`,
-                    transformOrigin: 'top center',
-                    transition: 'transform 0.1s ease-out'
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => onSelect(data.id)}
-            >
-                <ChangeAnglePanel
-                    imageUrl={data.resultUrl}
-                    settings={data.angleSettings || { rotation: 0, tilt: 0, scale: 0, wideAngle: false }}
-                    onSettingsChange={(settings) => onUpdate(data.id, { angleSettings: settings })}
-                    onClose={() => onUpdate(data.id, { angleMode: false })}
-                    onGenerate={handleAngleGenerate}
-                    isLoading={isLoading}
-                    canvasTheme={canvasTheme}
-                />
-            </div>
-        );
-    }
-
     return (
         <div
             className={`p-4 rounded-2xl shadow-2xl cursor-default w-full transition-colors duration-300 ${isDark ? 'bg-[#1a1a1a] border border-neutral-800' : 'bg-white border border-neutral-200'}`}
@@ -744,6 +719,31 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                                     videoGenerationMode === 'motion-control' ? 'Motion Control' :
                                                         'Frame-to-Frame'}
                                         </div>
+                                        {/* Seedance Models */}
+                                        {availableVideoModels.filter(m => m.provider === 'bytedance').length > 0 && (
+                                            <>
+                                                <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">
+                                                    Kie / ByteDance
+                                                </div>
+                                                {availableVideoModels.filter(m => m.provider === 'bytedance').map(model => (
+                                                    <button
+                                                        key={model.id}
+                                                        onClick={() => handleVideoModelChange(model.id)}
+                                                        className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-[#333] transition-colors ${currentVideoModel.id === model.id ? 'text-blue-400' : 'text-neutral-300'
+                                                            }`}
+                                                    >
+                                                        <span className="flex items-center gap-2">
+                                                            <Film size={12} className="text-pink-300" />
+                                                            {model.name}
+                                                            {model.recommended && (
+                                                                <span className="text-[9px] px-1 py-0.5 bg-green-600/30 text-green-400 rounded">REC</span>
+                                                            )}
+                                                        </span>
+                                                        {currentVideoModel.id === model.id && <Check size={12} />}
+                                                    </button>
+                                                ))}
+                                            </>
+                                        )}
                                         {/* Google Models */}
                                         {availableVideoModels.filter(m => m.provider === 'google').length > 0 && (
                                             <>
@@ -954,7 +954,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                 {/* Dropdown Menu */}
                                 {showSizeDropdown && (
                                     <div
-                                        className="absolute bottom-full mb-2 right-0 w-32 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-60 overflow-y-auto"
+                                        className="absolute bottom-full mb-2 right-0 w-max min-w-full bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-60 overflow-y-auto"
                                         onWheel={(e) => e.stopPropagation()}
                                     >
                                         <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">
@@ -964,7 +964,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                             <button
                                                 key={option}
                                                 onClick={() => handleSizeSelect(option)}
-                                                className={`flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-[#333] transition-colors ${currentSizeLabel === option ? 'text-blue-400' : 'text-neutral-300'
+                                                className={`flex items-center justify-between gap-4 px-3 py-2 text-xs text-left whitespace-nowrap hover:bg-[#333] transition-colors ${currentSizeLabel === option ? 'text-blue-400' : 'text-neutral-300'
                                                     }`}
                                             >
                                                 <span>{option}</span>
@@ -984,13 +984,13 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                     className="flex items-center gap-1.5 text-xs font-medium bg-[#252525] hover:bg-[#333] border border-neutral-700 text-white px-2.5 py-1.5 rounded-lg transition-colors"
                                 >
                                     <Monitor size={12} className="text-green-400" />
-                                    {data.resolution || 'Auto'}
+                                    {data.resolution || '1K'}
                                 </button>
 
                                 {/* Dropdown Menu */}
                                 {showResolutionDropdown && (
                                     <div
-                                        className="absolute bottom-full mb-2 right-0 w-24 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100"
+                                        className="absolute bottom-full mb-2 right-0 w-max min-w-full bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100"
                                         onWheel={(e) => e.stopPropagation()}
                                     >
                                         <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">
@@ -1000,10 +1000,10 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                             <button
                                                 key={res}
                                                 onClick={() => handleResolutionSelect(res)}
-                                                className={`flex items-center justify-between w-full px-3 py-2 text-xs text-left hover:bg-[#333] transition-colors ${(data.resolution || 'Auto') === res ? 'text-blue-400' : 'text-neutral-300'}`}
+                                                className={`flex items-center justify-between gap-4 w-full px-3 py-2 text-xs text-left whitespace-nowrap hover:bg-[#333] transition-colors ${(data.resolution || '1K') === res ? 'text-blue-400' : 'text-neutral-300'}`}
                                             >
                                                 <span>{res}</span>
-                                                {(data.resolution || 'Auto') === res && <Check size={12} />}
+                                                {(data.resolution || '1K') === res && <Check size={12} />}
                                             </button>
                                         ))}
                                     </div>
@@ -1295,8 +1295,8 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                         {/* Advanced Settings Content - Only for Video nodes */}
                         {showAdvanced && isVideoNode && (
                             <div className="mt-3 space-y-3">
-                                {/* Audio Toggle - Only for Kling 2.6 (Veo 3.1 SDK doesn't support generateAudio yet) */}
-                                {data.videoModel === 'kling-v2-6' && (
+                                {/* Audio Toggle - Supported by Seedance 2.0 Mini and Kling 2.6 */}
+                                {['seedance-2-0-mini', 'kling-v2-6'].includes(data.videoModel || '') && (
                                     <div className="inline-flex items-center gap-2 px-2.5 py-1.5 bg-neutral-800/50 rounded-lg w-fit">
                                         <svg className="w-3.5 h-3.5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />

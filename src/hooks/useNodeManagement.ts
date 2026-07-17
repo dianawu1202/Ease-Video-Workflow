@@ -46,8 +46,10 @@ export const useNodeManagement = () => {
             prompt: '',
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
+            imageModel: type === NodeType.IMAGE ? 'gpt-image-2' : undefined,
+            videoModel: type === NodeType.VIDEO ? 'seedance-2-0-mini' : undefined,
+            aspectRatio: type === NodeType.IMAGE ? '9:16' : 'Auto',
+            resolution: type === NodeType.IMAGE ? '1K' : 'Auto',
             parentIds: parentId ? [parentId] : []
         };
 
@@ -130,8 +132,10 @@ export const useNodeManagement = () => {
                         prompt: '',
                         status: NodeStatus.IDLE,
                         model: 'Banana Pro',
-                        aspectRatio: 'Auto',
-                        resolution: 'Auto',
+                        imageModel: type === NodeType.IMAGE ? 'gpt-image-2' : undefined,
+                        videoModel: type === NodeType.VIDEO ? 'seedance-2-0-mini' : undefined,
+                        aspectRatio: type === NodeType.IMAGE ? '9:16' : 'Auto',
+                        resolution: type === NodeType.IMAGE ? '1K' : 'Auto',
                         parentIds: contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : []
                     };
                 } else {
@@ -144,8 +148,10 @@ export const useNodeManagement = () => {
                         prompt: '',
                         status: NodeStatus.IDLE,
                         model: 'Banana Pro',
-                        aspectRatio: 'Auto',
-                        resolution: 'Auto',
+                        imageModel: type === NodeType.IMAGE ? 'gpt-image-2' : undefined,
+                        videoModel: type === NodeType.VIDEO ? 'seedance-2-0-mini' : undefined,
+                        aspectRatio: type === NodeType.IMAGE ? '9:16' : 'Auto',
+                        resolution: type === NodeType.IMAGE ? '1K' : 'Auto',
                         parentIds: []
                     };
                     // Update source to add new node as parent

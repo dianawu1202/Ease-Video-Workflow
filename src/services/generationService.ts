@@ -14,6 +14,7 @@ export interface GenerateImageParams {
   imageBase64?: string | string[]; // Supports single image or array of images
   imageModel?: string; // Image model version (e.g., 'gemini-pro', 'kling-v2')
   nodeId?: string; // ID of the node initiating generation
+  signal?: AbortSignal;
   // Kling V1.5 reference settings
   klingReferenceMode?: 'subject' | 'face';
   klingFaceIntensity?: number; // 0-100
@@ -31,6 +32,7 @@ export interface GenerateVideoParams {
   motionReferenceUrl?: string; // For Kling 2.6 motion control
   generateAudio?: boolean; // For Kling 2.6 and Veo 3.1 native audio (default: true)
   nodeId?: string; // ID of the node initiating generation
+  signal?: AbortSignal;
 }
 
 /**
@@ -38,10 +40,12 @@ export interface GenerateVideoParams {
  */
 export const generateImage = async (params: GenerateImageParams): Promise<string> => {
   try {
+    const { signal, ...bodyParams } = params;
     const response = await fetch('/api/generate-image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
+      body: JSON.stringify(bodyParams),
+      signal
     });
 
     if (!response.ok) {
@@ -66,10 +70,12 @@ export const generateImage = async (params: GenerateImageParams): Promise<string
  */
 export const generateVideo = async (params: GenerateVideoParams): Promise<string> => {
   try {
+    const { signal, ...bodyParams } = params;
     const response = await fetch('/api/generate-video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
+      body: JSON.stringify(bodyParams),
+      signal
     });
 
     if (!response.ok) {

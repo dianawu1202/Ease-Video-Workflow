@@ -2,13 +2,16 @@
  * storyboard.js
  * 
  * Routes for AI storyboard script generation.
- * Uses Gemini 2.0 Flash for generating scene descriptions from user story input.
+ * Uses Kie Gemini 3.5 Flash for storyboard text generation, with Google Gemini fallback.
  */
 
 import express from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateKieGeminiText, generateKieImage } from '../services/kie.js';
+import { saveBufferToFile } from '../utils/imageHelpers.js';
 
 const router = express.Router();
+const GOOGLE_STORYBOARD_TEXT_MODEL = 'gemini-2.0-flash';
 
 /**
  * Helper to retry async operations with exponential backoff
@@ -31,6 +34,27 @@ async function retryOperation(operation, maxRetries = 3, initialDelayMs = 2000) 
     }
 }
 
+async function generateStoryboardText(req, parts) {
+    const { KIE_API_KEY, GEMINI_API_KEY } = req.app.locals;
+
+    if (KIE_API_KEY) {
+        return await retryOperation(() => generateKieGeminiText({
+            parts,
+            apiKey: KIE_API_KEY,
+            model: 'gemini-3-5-flash'
+        }));
+    }
+
+    if (GEMINI_API_KEY) {
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: GOOGLE_STORYBOARD_TEXT_MODEL });
+        const result = await retryOperation(() => model.generateContent(parts));
+        return result.response.text();
+    }
+
+    throw new Error('Kie API key not configured. Add KIE_API_KEY to .env');
+}
+
 // ============================================================================
 // SCRIPT GENERATION
 // ============================================================================
@@ -45,14 +69,7 @@ async function retryOperation(operation, maxRetries = 3, initialDelayMs = 2000) 
 router.post('/generate-scripts', async (req, res) => {
     try {
         const { story, characterDescriptions, sceneCount, referenceImages, characterImages } = req.body;
-        const { GEMINI_API_KEY } = req.app.locals;
         const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
-
-        if (!GEMINI_API_KEY) {
-            return res.status(500).json({
-                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
-            });
-        }
 
         if (!story || !sceneCount) {
             return res.status(400).json({
@@ -69,10 +86,6 @@ router.post('/generate-scripts', async (req, res) => {
         }
 
         console.log(`[Storyboard] Generating ${count} scene scripts`);
-
-        // Initialize Gemini
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
         // Categorize reference images
         const refs = referenceImages || [];
@@ -129,7 +142,7 @@ REQUIREMENTS:
    - Middle scenes: Mix of Medium shots, Close-ups, Over-the-shoulder
    - Final scene: Impactful shot (can be wide for epic, or close-up for emotional)
 
-3. **Story Arc**: Beginning → Rising action → Climax → Resolution
+3. **Story Arc**: Beginning -> Rising action -> Climax -> Resolution
 
 4. **Lighting Consistency**: Maintain logical lighting throughout (time of day, indoor/outdoor)
 
@@ -253,9 +266,7 @@ Respond ONLY with valid JSON, no other text.`;
             }
         }
 
-        // Call Gemini with RETRY logic
-        const result = await retryOperation(() => model.generateContent(promptParts));
-        const responseText = result.response.text();
+        const responseText = await generateStoryboardText(req, promptParts);
 
         // Parse JSON from response
         let parsed;
@@ -316,20 +327,9 @@ Respond ONLY with valid JSON, no other text.`;
 router.post('/brainstorm-story', async (req, res) => {
     try {
         const { characterDescriptions, genre, referenceImages, characterImages } = req.body;
-        const { GEMINI_API_KEY } = req.app.locals;
         const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
 
-        if (!GEMINI_API_KEY) {
-            return res.status(500).json({
-                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
-            });
-        }
-
         console.log(`[Storyboard] Brainstorming story with ${characterDescriptions?.length || 0} characters`);
-
-        // Initialize Gemini
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
         // Build character context
         const characterContext = characterDescriptions && characterDescriptions.length > 0
@@ -399,10 +399,7 @@ Respond with ONLY the story synopsis, no additional text or formatting.`;
                 } catch (e) { console.error(e); }
             }
         }
-
-        // Call Gemini with RETRY
-        const result = await retryOperation(() => model.generateContent(promptParts));
-        const story = result.response.text().trim();
+        const story = (await generateStoryboardText(req, promptParts)).trim();
 
         console.log(`[Storyboard] Generated story: ${story.substring(0, 100)}...`);
 
@@ -428,13 +425,6 @@ Respond with ONLY the story synopsis, no additional text or formatting.`;
 router.post('/optimize-story', async (req, res) => {
     try {
         const { story, characterNames } = req.body;
-        const { GEMINI_API_KEY } = req.app.locals;
-
-        if (!GEMINI_API_KEY) {
-            return res.status(500).json({
-                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
-            });
-        }
 
         if (!story || typeof story !== 'string') {
             return res.status(400).json({
@@ -443,11 +433,6 @@ router.post('/optimize-story', async (req, res) => {
         }
 
         console.log(`[Storyboard] Optimizing story length: ${story.length} chars`);
-
-        // Initialize Gemini
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
         const systemPrompt = `You are an expert storyboard artist and writer.
         
 Your task is to REWRITE and OPTIMIZE the following story idea to make it perfect for AI image generation and storyboard creation.
@@ -465,8 +450,7 @@ INSTRUCTIONS:
 
 Respond with ONLY the optimized story text.`;
 
-        const result = await retryOperation(() => model.generateContent(systemPrompt));
-        const optimizedStory = result.response.text().trim();
+        const optimizedStory = (await generateStoryboardText(req, [systemPrompt])).trim();
 
         console.log(`[Storyboard] Optimized story: ${optimizedStory.substring(0, 50)}...`);
 
@@ -492,12 +476,11 @@ Respond with ONLY the optimized story text.`;
 router.post('/generate-composite', async (req, res) => {
     try {
         const { scripts, styleAnchor, characterDNA, sceneCount, referenceImages, characterImages } = req.body;
-        const { GEMINI_API_KEY } = req.app.locals;
+        const { GEMINI_API_KEY, KIE_API_KEY, IMAGES_DIR } = req.app.locals;
         const { resolveImageToBase64 } = await import('../utils/imageHelpers.js');
-
-        if (!GEMINI_API_KEY) {
+        if (!KIE_API_KEY && !GEMINI_API_KEY) {
             return res.status(500).json({
-                error: "Gemini API key not configured. Add GEMINI_API_KEY to .env"
+                error: "Kie API key not configured. Add KIE_API_KEY to .env"
             });
         }
 
@@ -530,6 +513,7 @@ router.post('/generate-composite', async (req, res) => {
         const promptParts = [];
         let hasReferenceImages = false;
         let hasStyleReference = false;
+        const referenceImageDataUrls = [];
         const scriptNamesWithImages = new Set();
 
         // Process reference images with categories (new format)
@@ -546,6 +530,7 @@ router.post('/generate-composite', async (req, res) => {
                         if (matches) {
                             const mimeType = matches[1];
                             const dataLength = matches[2].length;
+                            referenceImageDataUrls.push(base64Data);
                             console.log(`[Storyboard] Resolved ${ref.name}: ${mimeType}, Size: ${(dataLength / 1024 / 1024).toFixed(2)} MB`);
 
                             // Category-specific handling
@@ -613,6 +598,7 @@ router.post('/generate-composite', async (req, res) => {
                         if (matches) {
                             const mimeType = matches[1];
                             const dataLength = matches[2].length;
+                            referenceImageDataUrls.push(base64Data);
                             console.log(`[Storyboard] Resolved ${name}: ${mimeType}, Size: ${(dataLength / 1024 / 1024).toFixed(2)} MB`);
 
                             // Try to find matching script name from DNA keys
@@ -728,8 +714,31 @@ CRITICAL:
 3. LABELING: ADD A VISIBLE, HIGH-CONTRAST WHITE NUMBER (1, ${count > 1 ? '2, ' : ''}...) in the corner of each panel.`;
 
         console.log(`[Storyboard] Composite prompt preview: ${compositePrompt.substring(0, 100)}...`);
-        console.log(`[Storyboard] Sending request to Gemini... Parts: ${promptParts.length + 1}`);
+        if (KIE_API_KEY) {
+            console.log(`[Storyboard] Sending composite request to Kie GPT Image 2 with ${referenceImageDataUrls.length} reference image(s)`);
+            const startTime = Date.now();
+            const kieImageUrl = await retryOperation(() => generateKieImage({
+                prompt: compositePrompt,
+                imageBase64Array: referenceImageDataUrls.slice(0, 14),
+                aspectRatio: '16:9',
+                resolution: '1K',
+                apiKey: KIE_API_KEY
+            }));
+            const imageResponse = await fetch(kieImageUrl);
+            if (!imageResponse.ok) {
+                throw new Error('Failed to download composite image from Kie');
+            }
+            const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+            const imageFormat = kieImageUrl.includes('.jpg') || kieImageUrl.includes('.jpeg')
+                ? 'jpg'
+                : kieImageUrl.includes('.webp') ? 'webp' : 'png';
+            const saved = saveBufferToFile(imageBuffer, IMAGES_DIR, 'storyboard_composite', imageFormat);
+            const duration = Date.now() - startTime;
+            console.log(`[Storyboard] Kie composite image saved: ${saved.url} (${duration}ms)`);
+            return res.json({ imageUrl: saved.url });
+        }
 
+        console.log(`[Storyboard] Sending request to Gemini... Parts: ${promptParts.length + 1}`);
         promptParts.push({ text: compositePrompt });
 
         // Initialize Gemini for image generation

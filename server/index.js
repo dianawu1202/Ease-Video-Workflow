@@ -17,6 +17,7 @@ import tiktokPostRoutes from './routes/tiktok-post.js';
 import { processTikTokVideo, isValidTikTokUrl } from './tools/tiktok.js';
 import localModelsRoutes from './routes/local-models.js';
 import storyboardRoutes from './routes/storyboard.js';
+import { generateKieGeminiText } from './services/kie.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -102,6 +103,16 @@ if (!FAL_API_KEY) {
     console.warn("SERVER WARNING: FAL_API_KEY not set. Kling 2.6 Motion Control will not work.");
 }
 
+// ============================================================================
+// KIE.AI CONFIGURATION (GPT Image 2 and Kling 2.6)
+// ============================================================================
+
+const KIE_API_KEY = process.env.KIE_API_KEY;
+
+if (!KIE_API_KEY) {
+    console.warn("SERVER WARNING: KIE_API_KEY not set. Kie GPT Image 2 / Kling 2.6 models will not work.");
+}
+
 // Set up app.locals for sharing config with route modules
 app.locals.GEMINI_API_KEY = API_KEY;
 app.locals.KLING_ACCESS_KEY = KLING_ACCESS_KEY;
@@ -109,6 +120,7 @@ app.locals.KLING_SECRET_KEY = KLING_SECRET_KEY;
 app.locals.HAILUO_API_KEY = HAILUO_API_KEY;
 app.locals.OPENAI_API_KEY = OPENAI_API_KEY;
 app.locals.FAL_API_KEY = FAL_API_KEY;
+app.locals.KIE_API_KEY = KIE_API_KEY;
 app.locals.IMAGES_DIR = IMAGES_DIR;
 app.locals.VIDEOS_DIR = VIDEOS_DIR;
 app.locals.LIBRARY_DIR = LIBRARY_DIR;
@@ -699,30 +711,52 @@ app.post('/api/gemini/describe-image', async (req, res) => {
             return res.status(400).json({ error: 'Could not process image URL. Provide base64 data or a valid library path.', debug: { imageUrl } });
         }
 
-        const client = getClient();
-        // Correct SDK usage for @google/genai ^1.32.0
-        const result = await client.models.generateContent({
-            model: "gemini-2.0-flash",
-            contents: {
-                parts: [
-                    { text: prompt || "Describe this image in detail for video generation." },
-                    imagePart
-                ]
-            }
-        });
-
         let text = "";
 
-        // Handle @google/genai SDK response structure
-        if (result.candidates && result.candidates.length > 0) {
-            const candidate = result.candidates[0];
-            if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
-                text = candidate.content.parts[0].text || "";
+        if (KIE_API_KEY) {
+            try {
+                text = await generateKieGeminiText({
+                    apiKey: KIE_API_KEY,
+                    model: 'gemini-3-5-flash',
+                    parts: [
+                        { text: prompt || "Describe this image in detail for video generation." },
+                        imagePart
+                    ]
+                });
+            } catch (kieError) {
+                console.warn('[Gemini DescribeV2] Kie Gemini failed:', kieError.message);
+                if (!API_KEY) throw kieError;
             }
         }
-        // Fallback for other potential response shapes
-        else if (result.response && typeof result.response.text === 'function') {
-            text = result.response.text();
+
+        if (!text) {
+            if (!API_KEY) {
+                throw new Error('Kie API key not configured. Add KIE_API_KEY to .env');
+            }
+
+            const client = getClient();
+            // Correct SDK usage for @google/genai ^1.32.0
+            const result = await client.models.generateContent({
+                model: "gemini-2.0-flash",
+                contents: {
+                    parts: [
+                        { text: prompt || "Describe this image in detail for video generation." },
+                        imagePart
+                    ]
+                }
+            });
+
+            // Handle @google/genai SDK response structure
+            if (result.candidates && result.candidates.length > 0) {
+                const candidate = result.candidates[0];
+                if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+                    text = candidate.content.parts[0].text || "";
+                }
+            }
+            // Fallback for other potential response shapes
+            else if (result.response && typeof result.response.text === 'function') {
+                text = result.response.text();
+            }
         }
 
         if (!text) {
@@ -748,30 +782,49 @@ app.post('/api/gemini/optimize-prompt', async (req, res) => {
             return res.status(400).json({ error: 'Prompt is required' });
         }
 
-        const client = getClient();
         const systemInstruction = "You are an expert video prompt engineer. Your goal is to rewrite the user's prompt to be descriptive, visual, and optimized for AI video generation models like Veo, Kling, and Hailuo. detailed, cinematic, and focused on motion and atmosphere. Keep it under 60 words. Output ONLY the rewritten prompt.";
-
-        const result = await client.models.generateContent({
-            model: "gemini-2.0-flash",
-            contents: {
-                parts: [
-                    { text: `${systemInstruction}\n\nUser Prompt: ${prompt}` }
-                ]
-            }
-        });
 
         let text = "";
 
-        // Handle @google/genai SDK response structure
-        if (result.candidates && result.candidates.length > 0) {
-            const candidate = result.candidates[0];
-            if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
-                text = candidate.content.parts[0].text || "";
+        if (KIE_API_KEY) {
+            try {
+                text = await generateKieGeminiText({
+                    apiKey: KIE_API_KEY,
+                    model: 'gemini-3-5-flash',
+                    parts: [{ text: `${systemInstruction}\n\nUser Prompt: ${prompt}` }]
+                });
+            } catch (kieError) {
+                console.warn('[Gemini Optimize] Kie Gemini failed:', kieError.message);
+                if (!API_KEY) throw kieError;
             }
         }
-        // Fallback for other potential response shapes
-        else if (result.response && typeof result.response.text === 'function') {
-            text = result.response.text();
+
+        if (!text) {
+            if (!API_KEY) {
+                throw new Error('Kie API key not configured. Add KIE_API_KEY to .env');
+            }
+
+            const client = getClient();
+            const result = await client.models.generateContent({
+                model: "gemini-2.0-flash",
+                contents: {
+                    parts: [
+                        { text: `${systemInstruction}\n\nUser Prompt: ${prompt}` }
+                    ]
+                }
+            });
+
+            // Handle @google/genai SDK response structure
+            if (result.candidates && result.candidates.length > 0) {
+                const candidate = result.candidates[0];
+                if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+                    text = candidate.content.parts[0].text || "";
+                }
+            }
+            // Fallback for other potential response shapes
+            else if (result.response && typeof result.response.text === 'function') {
+                text = result.response.text();
+            }
         }
 
         if (!text) {
@@ -1148,10 +1201,10 @@ app.post('/api/trim-video', async (req, res) => {
 // Send a message to the chat agent
 app.post('/api/chat', async (req, res) => {
     try {
-        const { sessionId, message, media } = req.body;
+        const { sessionId, message, media, canvasContext } = req.body;
 
-        if (!API_KEY) {
-            return res.status(500).json({ error: "Server missing API Key config" });
+        if (!KIE_API_KEY) {
+            return res.status(500).json({ error: "KIE_API_KEY not configured. Add KIE_API_KEY to .env" });
         }
 
         if (!sessionId) {
@@ -1162,7 +1215,7 @@ app.post('/api/chat', async (req, res) => {
             return res.status(400).json({ error: "message or media is required" });
         }
 
-        const result = await chatAgent.sendMessage(sessionId, message, media, API_KEY);
+        const result = await chatAgent.sendMessage(sessionId, message, media, KIE_API_KEY, canvasContext);
 
         res.json({
             success: true,

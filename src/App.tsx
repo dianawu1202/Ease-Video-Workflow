@@ -12,7 +12,7 @@ import { TopBar } from './components/TopBar';
 import { CanvasNode } from './components/canvas/CanvasNode';
 import { ConnectionsLayer } from './components/canvas/ConnectionsLayer';
 import { ContextMenu } from './components/ContextMenu';
-import { ContextMenuState, NodeData, NodeStatus, NodeType } from './types';
+import { ContextMenuState, NodeData, NodeGroup, NodeStatus, NodeType, Viewport } from './types';
 import { generateImage, generateVideo } from './services/generationService';
 import { useCanvasNavigation } from './hooks/useCanvasNavigation';
 import { useNodeManagement } from './hooks/useNodeManagement';
@@ -52,6 +52,18 @@ import { useTikTokImport } from './hooks/useTikTokImport';
 import { useStoryboardGenerator } from './hooks/useStoryboardGenerator';
 import { StoryboardGeneratorModal } from './components/modals/StoryboardGeneratorModal';
 import { StoryboardVideoModal } from './components/modals/StoryboardVideoModal';
+
+const LOCAL_CANVAS_DRAFT_KEY = 'twitcanva:last-canvas-draft';
+const LAST_WORKFLOW_ID_KEY = 'twitcanva:last-workflow-id';
+
+interface LocalCanvasDraft {
+  title: string;
+  nodes: NodeData[];
+  groups: NodeGroup[];
+  viewport: Viewport;
+  workflowId: string | null;
+  updatedAt: string;
+}
 
 // ============================================================================
 // MAIN COMPONENT
@@ -228,6 +240,7 @@ export default function App() {
     canvasTitle,
     setNodes,
     setGroups,
+    setViewport,
     setSelectedNodeIds,
     setCanvasTitle,
     setEditingTitleValue,
@@ -245,6 +258,88 @@ export default function App() {
   const isInitialMount = React.useRef(true);
   const lastLoadingCountRef = React.useRef(0);
   const ignoreNextChange = React.useRef(false);
+  const hasRestoredCanvasDraftRef = React.useRef(false);
+  const shouldPersistCanvasDraftRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (hasRestoredCanvasDraftRef.current) return;
+    hasRestoredCanvasDraftRef.current = true;
+
+    let cancelled = false;
+
+    const restoreCanvas = async () => {
+      try {
+        const rawDraft = localStorage.getItem(LOCAL_CANVAS_DRAFT_KEY);
+        if (rawDraft) {
+          const draft = JSON.parse(rawDraft) as Partial<LocalCanvasDraft>;
+          if (Array.isArray(draft.nodes)) {
+            if (cancelled) return;
+            ignoreNextChange.current = true;
+            setNodes(draft.nodes);
+            setGroups(Array.isArray(draft.groups) ? draft.groups : []);
+            setSelectedNodeIds([]);
+
+            if (draft.viewport && typeof draft.viewport.x === 'number') {
+              setViewport(draft.viewport);
+            }
+
+            const restoredTitle = draft.title || 'Untitled Canvas';
+            setCanvasTitle(restoredTitle);
+            setEditingTitleValue(restoredTitle);
+            setIsDirty(false);
+            console.log('[Canvas Draft] Restored local canvas draft');
+            return;
+          }
+        }
+
+        const lastWorkflowId = localStorage.getItem(LAST_WORKFLOW_ID_KEY);
+        if (lastWorkflowId) {
+          ignoreNextChange.current = true;
+          const loaded = await handleLoadWorkflow(lastWorkflowId);
+          if (loaded) {
+            setIsDirty(false);
+            console.log('[Canvas Draft] Restored last saved workflow');
+          }
+        }
+      } catch (error) {
+        console.warn('[Canvas Draft] Failed to restore canvas:', error);
+      } finally {
+        if (cancelled) return;
+        window.setTimeout(() => {
+          shouldPersistCanvasDraftRef.current = true;
+        }, 0);
+      }
+    };
+
+    restoreCanvas();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [handleLoadWorkflow, setNodes, setGroups, setSelectedNodeIds, setViewport, setCanvasTitle, setEditingTitleValue]);
+
+  React.useEffect(() => {
+    if (!hasRestoredCanvasDraftRef.current || !shouldPersistCanvasDraftRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      const draft: LocalCanvasDraft = {
+        title: canvasTitle,
+        nodes,
+        groups,
+        viewport,
+        workflowId,
+        updatedAt: new Date().toISOString()
+      };
+
+      try {
+        localStorage.setItem(LOCAL_CANVAS_DRAFT_KEY, JSON.stringify(draft));
+      } catch (error) {
+        console.warn('[Canvas Draft] Failed to persist local draft:', error);
+      }
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [nodes, groups, viewport, canvasTitle, workflowId]);
 
   React.useEffect(() => {
     if (isInitialMount.current) {
@@ -281,7 +376,7 @@ export default function App() {
     setIsDirty(false);
   };
 
-  const { handleGenerate } = useGeneration({
+  const { handleGenerate, handleCancelGeneration } = useGeneration({
     nodes,
     updateNode
   });
@@ -295,6 +390,7 @@ export default function App() {
   // Create new canvas
   const handleNewCanvas = () => {
     ignoreNextChange.current = true;
+    localStorage.removeItem(LOCAL_CANVAS_DRAFT_KEY);
     setNodes([]);
     setGroups([]); // Reset groups for new canvas
     setSelectedNodeIds([]);
@@ -341,12 +437,18 @@ export default function App() {
     handleTextToImage
   } = useTextNodeHandlers({ nodes, updateNode, setNodes, setSelectedNodeIds });
 
+  const handleGenerateCreatedNode = React.useCallback((nodeId: string) => {
+    setTimeout(() => {
+      handleGenerateRef.current(nodeId);
+    }, 100);
+  }, []);
+
   // Image node handlers
   const {
     handleImageToImage,
     handleImageToVideo,
-    handleChangeAngleGenerate
-  } = useImageNodeHandlers({ nodes, setNodes, setSelectedNodeIds, onGenerateNode: handleGenerate });
+    handleMakeCharacterTurnaround
+  } = useImageNodeHandlers({ nodes, setNodes, setSelectedNodeIds, onGenerateNode: handleGenerateCreatedNode });
 
   // Asset handlers (create asset modal)
   const {
@@ -383,7 +485,7 @@ export default function App() {
     isDirty,
     nodes,
     onSave: handleSaveWithTracking,
-    interval: 60000 // Save every 60 seconds
+    interval: 5000 // Save every 5 seconds so refreshes keep recent nodes/resources
   });
 
   // Generation Recovery Management
@@ -424,7 +526,7 @@ export default function App() {
       y: data.y || 0,
       prompt: data.prompt || '',
       status: data.status || NodeStatus.IDLE,
-      model: data.model || 'gpt-image-1.5',
+      model: data.model || 'gpt-image-2',
       imageModel: data.imageModel,
       aspectRatio: data.aspectRatio || '16:9',
       resolution: data.resolution || '1K',
@@ -473,6 +575,19 @@ export default function App() {
     onCreateNodes: handleCreateStoryboardNodes,
     viewport
   });
+
+  const handleCreateStoryboardFromImage = React.useCallback((nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node?.resultUrl) return;
+
+    storyboardGenerator.openWithCharacters([{
+      id: node.id,
+      name: node.title || '\u89d2\u8272\u53c2\u8003',
+      url: node.resultUrl,
+      description: node.prompt || 'Character reference image from the canvas',
+      category: 'Character'
+    }]);
+  }, [nodes, storyboardGenerator]);
 
   const handleEditStoryboard = React.useCallback((groupId: string) => {
     const group = groups.find(g => g.id === groupId);
@@ -707,7 +822,7 @@ export default function App() {
     const createNode = (resultAspectRatio?: string, aspectRatio?: string) => {
       const isVideo = type === 'videos';
       // Use the original model from asset metadata, or fall back to defaults
-      const defaultModel = isVideo ? 'veo-3.1' : 'imagen-3.0-generate-002';
+      const defaultModel = isVideo ? 'seedance-2-0-mini' : 'imagen-3.0-generate-002';
       const nodeModel = model || defaultModel;
 
       const newNode: NodeData = {
@@ -1064,7 +1179,14 @@ export default function App() {
       {!storyboardGenerator.isModalOpen && !isTikTokModalOpen && (
         <>
           <ChatBubble onClick={toggleChat} isOpen={isChatOpen} />
-          <ChatPanel isOpen={isChatOpen} onClose={closeChat} isDraggingNode={isDraggingNodeToChat} canvasTheme={canvasTheme} />
+          <ChatPanel
+            isOpen={isChatOpen}
+            onClose={closeChat}
+            isDraggingNode={isDraggingNodeToChat}
+            canvasTheme={canvasTheme}
+            nodes={nodes}
+            selectedNodeIds={selectedNodeIds}
+          />
         </>
       )}
 
@@ -1172,6 +1294,7 @@ export default function App() {
                 })()}
                 onUpdate={updateNodeWithSync}
                 onGenerate={handleGenerate}
+                onCancelGeneration={handleCancelGeneration}
                 onAddNext={handleAddNext}
                 onStartReferencePick={handleStartReferencePick}
                 isPickingReference={referencePickTargetVideoId === node.id}
@@ -1214,7 +1337,8 @@ export default function App() {
                 onTextToImage={handleTextToImage}
                 onImageToImage={handleImageToImage}
                 onImageToVideo={handleImageToVideo}
-                onChangeAngleGenerate={handleChangeAngleGenerate}
+                onMakeCharacterTurnaround={handleMakeCharacterTurnaround}
+                onCreateStoryboardFromImage={handleCreateStoryboardFromImage}
                 zoom={viewport.zoom}
                 onMouseEnter={() => setCanvasHoveredNodeId(node.id)}
                 onMouseLeave={() => setCanvasHoveredNodeId(null)}
@@ -1315,7 +1439,7 @@ export default function App() {
 
       {referencePickTargetVideoId && (
         <div className={`fixed left-1/2 top-6 z-[1200] -translate-x-1/2 rounded-full border px-4 py-2 text-sm shadow-2xl backdrop-blur-md ${canvasTheme === 'dark' ? 'border-blue-500/40 bg-neutral-950/85 text-blue-100' : 'border-blue-300 bg-white/90 text-blue-700'}`}>
-          请选择画布上的图片或视频资源作为参考，点击空白处取消
+          {'\u8bf7\u9009\u62e9\u753b\u5e03\u4e0a\u7684\u56fe\u7247\u6216\u89c6\u9891\u8d44\u6e90\u4f5c\u4e3a\u53c2\u8003\uff0c\u70b9\u51fb\u7a7a\u767d\u5904\u53d6\u6d88'}
         </div>
       )}
 
@@ -1360,7 +1484,7 @@ export default function App() {
         nodeId={editorModal.nodeId || ''}
         imageUrl={editorModal.imageUrl}
         initialPrompt={nodes.find(n => n.id === editorModal.nodeId)?.prompt}
-        initialModel={nodes.find(n => n.id === editorModal.nodeId)?.imageModel || 'gemini-pro'}
+        initialModel={nodes.find(n => n.id === editorModal.nodeId)?.imageModel || 'gpt-image-2'}
         initialAspectRatio={nodes.find(n => n.id === editorModal.nodeId)?.aspectRatio || 'Auto'}
         initialResolution={nodes.find(n => n.id === editorModal.nodeId)?.resolution || '1K'}
         initialElements={nodes.find(n => n.id === editorModal.nodeId)?.editorElements as any}
@@ -1375,7 +1499,7 @@ export default function App() {
           if (!sourceNode) return;
 
           // Get settings from source node (which were updated by the modal)
-          const imageModel = sourceNode.imageModel || 'gemini-pro';
+          const imageModel = sourceNode.imageModel || 'gpt-image-2';
           const aspectRatio = sourceNode.aspectRatio || 'Auto';
           const resolution = sourceNode.resolution || '1K';
 

@@ -30,6 +30,35 @@ export interface ChatSession {
     messageCount: number;
 }
 
+export interface ChatCanvasContext {
+    totals?: {
+        totalNodes: number;
+        selectedNodes: number;
+        imageNodes: number;
+        videoNodes: number;
+        textNodes: number;
+    };
+    selectedNodes?: {
+        id: string;
+        type: string;
+        title?: string;
+        prompt?: string;
+        status?: string;
+        hasResult?: boolean;
+        parentIds?: string[];
+    }[];
+    recentNodes?: {
+        id: string;
+        type: string;
+        title?: string;
+        prompt?: string;
+        status?: string;
+        hasResult?: boolean;
+        parentIds?: string[];
+    }[];
+    storyContext?: string;
+}
+
 interface UseChatAgentReturn {
     messages: ChatMessage[];
     topic: string | null;
@@ -38,7 +67,11 @@ interface UseChatAgentReturn {
     error: string | null;
     sessions: ChatSession[];
     isLoadingSessions: boolean;
-    sendMessage: (content: string, media?: { type: 'image' | 'video'; url: string; base64?: string }[]) => Promise<void>;
+    sendMessage: (
+        content: string,
+        media?: { type: 'image' | 'video'; url: string; base64?: string }[],
+        canvasContext?: ChatCanvasContext
+    ) => Promise<void>;
     startNewChat: () => void;
     loadSession: (sessionId: string) => Promise<void>;
     deleteSession: (sessionId: string) => Promise<void>;
@@ -177,7 +210,8 @@ export function useChatAgent(): UseChatAgentReturn {
      */
     const sendMessage = useCallback(async (
         content: string,
-        media?: { type: 'image' | 'video'; url: string; base64?: string }[]
+        media?: { type: 'image' | 'video'; url: string; base64?: string }[],
+        canvasContext?: ChatCanvasContext
     ) => {
         const currentSessionId = ensureSession();
         setError(null);
@@ -202,8 +236,10 @@ export function useChatAgent(): UseChatAgentReturn {
                     message: content,
                     media: media ? media.map(m => ({
                         type: m.type,
+                        url: m.url,
                         base64: m.base64 || m.url, // Use base64 if available, otherwise URL
                     })) : undefined,
+                    canvasContext,
                 }),
             });
 

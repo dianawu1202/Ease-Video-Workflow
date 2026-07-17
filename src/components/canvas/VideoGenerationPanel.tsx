@@ -26,7 +26,7 @@ interface VideoGenerationPanelProps {
 type VideoModel = {
   id: string;
   name: string;
-  provider: 'google' | 'kling' | 'hailuo';
+  provider: 'bytedance' | 'google' | 'kling' | 'hailuo';
   supportsTextToVideo: boolean;
   supportsImageToVideo: boolean;
   supportsMultiImage: boolean;
@@ -37,8 +37,9 @@ type VideoModel = {
 };
 
 const VIDEO_MODELS: VideoModel[] = [
+  { id: 'seedance-2-0-mini', name: 'Seedance 2.0 Mini', provider: 'bytedance', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
   { id: 'veo-3.1', name: 'Veo 3.1', provider: 'google', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [4, 6, 8], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
-  { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, recommended: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
+  { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
   { id: 'kling-v2-1-master', name: 'Kling V2.1 Master', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
   { id: 'kling-v2-5-turbo', name: 'Kling V2.5 Turbo', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
   { id: 'kling-v2-6', name: 'Kling 2.6 Motion', provider: 'kling', supportsTextToVideo: true, supportsImageToVideo: true, supportsMultiImage: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'], aspectRatios: ['16:9', '9:16'] },
@@ -159,6 +160,7 @@ const CAMERA_MOVE_PRESETS: CameraMovePreset[] = [
 ];
 
 const getModelIcon = (model: VideoModel) => {
+  if (model.provider === 'bytedance') return <VideoIcon size={14} className="text-pink-300" />;
   if (model.provider === 'google') return <GoogleIcon size={13} className="text-white" />;
   if (model.provider === 'kling') return <KlingIcon size={15} />;
   return <HailuoIcon size={15} />;

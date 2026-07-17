@@ -47,6 +47,7 @@ export const useTextNodeHandlers = ({
             prompt: textNode.prompt || '',
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
+            videoModel: 'seedance-2-0-mini',
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: [nodeId]
@@ -83,8 +84,9 @@ export const useTextNodeHandlers = ({
             prompt: textNode.prompt || '',
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
+            imageModel: 'gpt-image-2',
+            aspectRatio: '9:16',
+            resolution: '1K',
             parentIds: [nodeId]
         };
 

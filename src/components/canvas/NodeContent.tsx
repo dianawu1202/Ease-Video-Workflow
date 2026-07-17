@@ -6,7 +6,7 @@
  */
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Loader2, Maximize2, ImageIcon as ImageIcon, Film, Upload, Pencil, Video, GripVertical, Download, Expand, Shrink, HardDrive } from 'lucide-react';
+import { AlertCircle, Loader2, Maximize2, ImageIcon as ImageIcon, Film, Upload, Pencil, Video, GripVertical, Download, Expand, Shrink, HardDrive, RotateCcw, Square } from 'lucide-react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
 
 interface NodeContentProps {
@@ -28,6 +28,8 @@ interface NodeContentProps {
     // Image node callbacks
     onImageToImage?: (nodeId: string) => void;
     onImageToVideo?: (nodeId: string) => void;
+    onGenerate?: (nodeId: string) => void;
+    onCancelGeneration?: (nodeId: string) => void;
     onUpdate?: (nodeId: string, updates: Partial<NodeData>) => void;
     // Social sharing
     onPostToX?: (nodeId: string, mediaUrl: string, mediaType: 'image' | 'video') => void;
@@ -50,6 +52,8 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     onTextToImage,
     onImageToImage,
     onImageToVideo,
+    onGenerate,
+    onCancelGeneration,
     onUpdate,
     onPostToX
 }) => {
@@ -66,6 +70,8 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     const isVideoType = data.type === NodeType.VIDEO || data.type === NodeType.LOCAL_VIDEO_MODEL;
     // Helper: Check if node is local model
     const isLocalModel = data.type === NodeType.LOCAL_IMAGE_MODEL || data.type === NodeType.LOCAL_VIDEO_MODEL;
+    const isError = data.status === NodeStatus.ERROR;
+    const hasResult = Boolean(data.resultUrl);
 
     // Sync local state ONLY when data.prompt changes externally (not from our own update)
     useEffect(() => {
@@ -121,8 +127,8 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                 />
             )}
 
-            {/* Result View - Show when successful OR when regenerating (loading with existing content) */}
-            {(isSuccess || isLoading) && data.resultUrl ? (
+            {/* Result View - Show when successful, regenerating, or failed with existing content */}
+            {(isSuccess || isLoading || (isError && hasResult)) && data.resultUrl ? (
                 <div
                     className={`relative w-full bg-black group/image ${!selected ? '' : 'rounded-xl overflow-hidden'}`}
                     style={getAspectRatioStyle()}
@@ -138,6 +144,44 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
                             <Loader2 size={40} className="animate-spin text-blue-400" />
                             <span className="mt-3 text-sm text-white font-medium">Regenerating...</span>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onCancelGeneration?.(data.id);
+                                }}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                className="mt-3 flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/20"
+                            >
+                                <Square size={12} className="fill-current" />
+                                Stop
+                            </button>
+                        </div>
+                    )}
+
+                    {isError && (
+                        <div className="absolute inset-x-3 bottom-3 z-20 rounded-xl border border-red-500/30 bg-black/75 p-3 text-white shadow-xl backdrop-blur-md">
+                            <div className="flex items-start gap-2">
+                                <AlertCircle size={15} className="mt-0.5 shrink-0 text-red-400" />
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-semibold text-red-200">Generation failed</div>
+                                    <div className="mt-1 line-clamp-2 text-[11px] text-neutral-300">
+                                        {data.errorMessage || 'Generation failed. Click retry to generate again.'}
+                                    </div>
+                                </div>
+                                {onGenerate && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onGenerate(data.id);
+                                        }}
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                        className="flex shrink-0 items-center gap-1 rounded-full bg-blue-500 px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-blue-400"
+                                    >
+                                        <RotateCcw size={11} />
+                                        Retry
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
@@ -230,11 +274,45 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                         <div className="relative z-10 flex flex-col items-center gap-2">
                             <Loader2 size={32} className="animate-spin text-blue-400" />
                             <span className="text-xs text-neutral-500 font-medium">Generating...</span>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onCancelGeneration?.(data.id);
+                                }}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                className="mt-1 flex items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-900/80 px-3 py-1.5 text-xs font-medium text-neutral-200 transition-colors hover:bg-neutral-800"
+                            >
+                                <Square size={12} className="fill-current" />
+                                Stop
+                            </button>
                         </div>
                     ) : (
                         <div className="relative z-10 flex flex-col items-center gap-3">
+                            {isError && (
+                                <div className="flex max-w-[280px] flex-col items-center gap-2 px-4 text-center">
+                                    <AlertCircle size={28} className="text-red-400" />
+                                    <div className="text-sm font-semibold text-red-200">Generation failed</div>
+                                    <div className="line-clamp-3 text-xs text-neutral-500">
+                                        {data.errorMessage || 'Generation failed. Click retry to generate again.'}
+                                    </div>
+                                    {onGenerate && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onGenerate(data.id);
+                                            }}
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                            className="mt-1 flex items-center gap-1.5 rounded-full bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-400"
+                                        >
+                                            <RotateCcw size={12} />
+                                            Retry
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Upload Button for Image Nodes (including local image models) */}
-                            {isImageType && onUpload && (
+                            {!isError && isImageType && onUpload && (
                                 <>
                                     <input
                                         ref={fileInputRef}
@@ -254,14 +332,14 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                                 </>
                             )}
 
-                            <div className="text-neutral-700">
+                            {!isError && <div className="text-neutral-700">
                                 {isVideoType ? (
                                     isLocalModel ? <><Film size={40} /><HardDrive size={16} className="absolute -bottom-1 -right-1 text-purple-400" /></> : <Film size={40} />
                                 ) : (
                                     isLocalModel ? <><ImageIcon size={40} /><HardDrive size={16} className="absolute -bottom-1 -right-1 text-purple-400" /></> : <ImageIcon size={40} />
                                 )}
-                            </div>
-                            {selected && (
+                            </div>}
+                            {!isError && selected && (
                                 <>
                                     <div className="text-neutral-500 text-sm font-medium">
                                         {isVideoType && inputUrl

@@ -5,6 +5,7 @@
  * Manages generation state, API calls, and error handling.
  */
 
+import { useEffect, useRef } from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
 import { generateImage, generateVideo } from '../services/generationService';
 import { generateLocalImage } from '../services/localModelService';
@@ -15,7 +16,30 @@ interface UseGenerationProps {
     updateNode: (id: string, updates: Partial<NodeData>) => void;
 }
 
+interface ActiveGeneration {
+    controller: AbortController;
+    timeoutId: ReturnType<typeof window.setTimeout>;
+    token: string;
+    abortReason?: 'manual' | 'timeout' | 'replaced';
+}
+
+const IMAGE_GENERATION_TIMEOUT_MS = 8 * 60 * 1000;
+const VIDEO_GENERATION_TIMEOUT_MS = 25 * 60 * 1000;
+
 export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
+    const activeGenerationsRef = useRef<Map<string, ActiveGeneration>>(new Map());
+
+    useEffect(() => {
+        return () => {
+            activeGenerationsRef.current.forEach(active => {
+                window.clearTimeout(active.timeoutId);
+                active.abortReason = 'manual';
+                active.controller.abort();
+            });
+            activeGenerationsRef.current.clear();
+        };
+    }, []);
+
     // ============================================================================
     // HELPERS
     // ============================================================================
@@ -72,9 +96,44 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
         });
     };
 
+    const getGenerationTimeoutMs = (node: NodeData) => {
+        return node.type === NodeType.VIDEO || node.type === NodeType.LOCAL_VIDEO_MODEL
+            ? VIDEO_GENERATION_TIMEOUT_MS
+            : IMAGE_GENERATION_TIMEOUT_MS;
+    };
+
+    const getTimeoutLabel = (timeoutMs: number) => `${Math.round(timeoutMs / 60000)} minutes`;
+
+    const cleanupActiveGeneration = (id: string, token: string) => {
+        const active = activeGenerationsRef.current.get(id);
+        if (!active || active.token !== token) return;
+        window.clearTimeout(active.timeoutId);
+        activeGenerationsRef.current.delete(id);
+    };
+
+    const isCurrentGeneration = (id: string, token: string) => {
+        return activeGenerationsRef.current.get(id)?.token === token;
+    };
+
+    const handleCancelGeneration = (id: string) => {
+        const active = activeGenerationsRef.current.get(id);
+
+        if (active) {
+            active.abortReason = 'manual';
+            active.controller.abort();
+            window.clearTimeout(active.timeoutId);
+            activeGenerationsRef.current.delete(id);
+        }
+
+        updateNode(id, {
+            status: NodeStatus.ERROR,
+            errorMessage: 'Generation stopped. Click retry to generate again.',
+            generationStartTime: undefined
+        });
+    };
+
     // ============================================================================
-    // GENERATION HANDLER
-    // ============================================================================
+    // GENERATION HANDLER    // ============================================================================
 
     /**
      * Handles content generation for a node
@@ -108,7 +167,34 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
         if (!combinedPrompt && !isKlingFrameToFrame) return;
 
-        updateNode(id, { status: NodeStatus.LOADING, generationStartTime: Date.now() });
+        const existingActive = activeGenerationsRef.current.get(id);
+        if (existingActive) {
+            existingActive.abortReason = 'replaced';
+            existingActive.controller.abort();
+            window.clearTimeout(existingActive.timeoutId);
+            activeGenerationsRef.current.delete(id);
+        }
+
+        const controller = new AbortController();
+        const token = crypto.randomUUID();
+        const generationStartTime = Date.now();
+        const timeoutMs = getGenerationTimeoutMs(node);
+        const timeoutId = window.setTimeout(() => {
+            const active = activeGenerationsRef.current.get(id);
+            if (!active || active.token !== token) return;
+
+            active.abortReason = 'timeout';
+            active.controller.abort();
+            activeGenerationsRef.current.delete(id);
+            updateNode(id, {
+                status: NodeStatus.ERROR,
+                errorMessage: `Generation timed out after ${getTimeoutLabel(timeoutMs)}. Click retry to generate again.`,
+                generationStartTime: undefined
+            });
+        }, timeoutMs);
+
+        activeGenerationsRef.current.set(id, { controller, timeoutId, token });
+        updateNode(id, { status: NodeStatus.LOADING, generationStartTime, errorMessage: undefined });
 
         try {
             if (node.type === NodeType.IMAGE || node.type === NodeType.IMAGE_EDITOR) {
@@ -153,13 +239,16 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     aspectRatio: node.aspectRatio,
                     resolution: node.resolution,
                     imageBase64: imageBase64s.length > 0 ? imageBase64s : undefined,
-                    imageModel: node.imageModel,
+                    imageModel: node.imageModel || 'gpt-image-2',
                     nodeId: id,
+                    signal: controller.signal,
                     // Kling V1.5 reference settings
                     klingReferenceMode: node.klingReferenceMode,
                     klingFaceIntensity: node.klingFaceIntensity,
                     klingSubjectIntensity: node.klingSubjectIntensity
                 });
+
+                if (!isCurrentGeneration(id, token)) return;
 
                 // Add cache-busting parameter to force browser to fetch new image
                 // (Backend uses nodeId as filename, so URL is the same for regenerated images)
@@ -167,6 +256,8 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
                 // Detect actual image dimensions (for display purposes only)
                 const { resultAspectRatio } = await getImageAspectRatio(resultUrl);
+
+                if (!isCurrentGeneration(id, token)) return;
 
                 // Keep user's selected aspectRatio - don't overwrite it with detected ratio
                 updateNode(id, {
@@ -182,10 +273,13 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 // --- LOCAL MODEL GENERATION ---
                 // Check if model is selected
                 if (!node.localModelId && !node.localModelPath) {
-                    updateNode(id, {
-                        status: NodeStatus.ERROR,
-                        errorMessage: 'No local model selected. Please select a model first.'
-                    });
+                    if (isCurrentGeneration(id, token)) {
+                        updateNode(id, {
+                            status: NodeStatus.ERROR,
+                            errorMessage: 'No local model selected. Please select a model first.',
+                            generationStartTime: undefined
+                        });
+                    }
                     return;
                 }
 
@@ -209,12 +303,16 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     resolution: node.resolution || '512'
                 });
 
+                if (!isCurrentGeneration(id, token)) return;
+
                 if (result.success && result.resultUrl) {
                     // Add cache-busting parameter
                     const resultUrl = `${result.resultUrl}?t=${Date.now()}`;
 
                     // Detect actual image dimensions
                     const { resultAspectRatio } = await getImageAspectRatio(resultUrl);
+
+                    if (!isCurrentGeneration(id, token)) return;
 
                     updateNode(id, {
                         status: NodeStatus.SUCCESS,
@@ -231,28 +329,32 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 let imageBase64: string | undefined;
                 let lastFrameBase64: string | undefined;
 
-                // Get non-TEXT parent nodes (image sources only)
-                const imageParentIds = node.parentIds?.filter(pid => {
+                // Separate visual parent nodes by media type so reference videos don't get treated as start frames.
+                const visualParentIds = node.parentIds?.filter(pid => {
                     const parent = nodes.find(n => n.id === pid);
                     return parent?.type !== NodeType.TEXT;
                 }) || [];
+                const imageParentIds = visualParentIds.filter(pid => {
+                    const parent = nodes.find(n => n.id === pid);
+                    return parent?.type !== NodeType.VIDEO;
+                });
 
                 // Check for frame-to-frame mode (explicit or auto-detected from 2+ image parents)
                 const hasMultipleInputs = imageParentIds.length >= 2;
                 const hasExplicitFrameInputs = node.frameInputs && node.frameInputs.length >= 2;
 
-                // Motion Reference logic (Kling 2.6)
+                // Video reference logic. Kling uses it for motion control; Seedance sends it as reference_video_urls.
                 let motionReferenceUrl: string | undefined;
                 let isMotionControl = false;
-                if (node.videoModel === 'kling-v2-6') {
+                if (node.videoModel === 'kling-v2-6' || node.videoModel === 'seedance-2-0-mini') {
                     // Find a parent video node that has a result
-                    const videoParent = node.parentIds
+                    const videoParent = visualParentIds
                         ?.map(pid => nodes.find(n => n.id === pid))
                         .find(n => n?.type === NodeType.VIDEO && n.resultUrl);
 
                     if (videoParent) {
                         motionReferenceUrl = videoParent.resultUrl;
-                        isMotionControl = true;
+                        isMotionControl = node.videoModel === 'kling-v2-6';
                     }
                 }
 
@@ -291,7 +393,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     // Standard mode or Motion Control: get character reference or first parent image
                     if (isMotionControl) {
                         // For Motion Control, look specifically for an IMAGE parent as character reference
-                        const characterParent = node.parentIds
+                        const characterParent = visualParentIds
                             ?.map(pid => nodes.find(n => n.id === pid))
                             .find(n => n?.type === NodeType.IMAGE && n.resultUrl);
 
@@ -299,15 +401,10 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                             imageBase64 = characterParent.resultUrl;
                         }
                     } else {
-                        // Standard mode: get first parent image or video last frame
-                        // Use imageParentIds (filtered to exclude TEXT nodes) instead of raw parentIds
+                        // Standard mode: get first parent image.
                         const parent = nodes.find(n => n.id === imageParentIds[0]);
 
-                        if (parent?.type === NodeType.VIDEO && parent.lastFrame) {
-                            // Use last frame from parent video
-                            imageBase64 = parent.lastFrame;
-                        } else if (parent?.resultUrl) {
-                            // Use parent image directly
+                        if (parent?.resultUrl) {
                             imageBase64 = parent.resultUrl;
                         }
                     }
@@ -321,11 +418,14 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     aspectRatio: node.aspectRatio,
                     resolution: node.resolution,
                     duration: node.videoDuration,
-                    videoModel: node.videoModel,
+                    videoModel: node.videoModel || 'seedance-2-0-mini',
                     motionReferenceUrl,
                     generateAudio: node.generateAudio, // For Kling 2.6 and Veo 3.1 native audio
-                    nodeId: id
+                    nodeId: id,
+                    signal: controller.signal
                 });
+
+                if (!isCurrentGeneration(id, token)) return;
 
                 // Add cache-busting parameter to force browser to fetch new video
                 // (Backend uses nodeId as filename, so URL is the same for regenerated videos)
@@ -333,6 +433,8 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
                 // Extract last frame for chaining
                 const lastFrame = await extractVideoLastFrame(resultUrl);
+
+                if (!isCurrentGeneration(id, token)) return;
 
                 // Detect video aspect ratio
                 let resultAspectRatio: string | undefined;
@@ -352,6 +454,8 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     // Ignore errors, use undefined aspect ratio
                 }
 
+                if (!isCurrentGeneration(id, token)) return;
+
                 updateNode(id, {
                     status: NodeStatus.SUCCESS,
                     resultUrl,
@@ -364,6 +468,13 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
 
             }
         } catch (error: any) {
+            if (!isCurrentGeneration(id, token)) return;
+
+            const abortReason = activeGenerationsRef.current.get(id)?.abortReason;
+            if (error?.name === 'AbortError' || abortReason) {
+                return;
+            }
+
             // Handle errors
             const msg = error.toString().toLowerCase();
             let errorMessage = error.message || 'Generation failed';
@@ -371,11 +482,13 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
             if (msg.includes('permission_denied') || msg.includes('403')) {
                 errorMessage = 'Permission denied. Check API Key configuration.';
             } else if (msg.includes('unable to process input image') || msg.includes('invalid_argument')) {
-                errorMessage = '⚠️ Input image incompatible. Veo requires: JPEG format, 16:9 or 9:16 aspect ratio. Try a different image or generate without input.';
+                errorMessage = 'Input image incompatible. Veo requires: JPEG format, 16:9 or 9:16 aspect ratio. Try a different image or generate without input.';
             }
 
-            updateNode(id, { status: NodeStatus.ERROR, errorMessage });
+            updateNode(id, { status: NodeStatus.ERROR, errorMessage, generationStartTime: undefined });
             console.error('Generation failed:', error);
+        } finally {
+            cleanupActiveGeneration(id, token);
         }
     };
 
@@ -384,6 +497,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
     // ============================================================================
 
     return {
-        handleGenerate
+        handleGenerate,
+        handleCancelGeneration
     };
 };

@@ -13,8 +13,9 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createChatGraph, generateTopicTitle } from "./graph/chatGraph.js";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { generateKieGpt55Chat } from "../services/kie.js";
+import { CHAT_AGENT_SYSTEM_PROMPT, TOPIC_GENERATION_PROMPT } from "./prompts/system.js";
 
 // ============================================================================
 // FILE PATHS
@@ -108,6 +109,112 @@ function contentToText(content) {
     }
 
     return JSON.stringify(content);
+}
+
+function messageRole(message) {
+    return message._getType?.() === 'human' ? 'user' : 'assistant';
+}
+
+function messagesToConversation(messages) {
+    return messages.map(message => ({
+        role: messageRole(message),
+        content: contentToText(message.content)
+    }));
+}
+
+function normalizeMediaForModel(media) {
+    if (!Array.isArray(media)) return [];
+
+    return media.map(item => {
+        if (!item) return null;
+
+        if (item.type === 'image') {
+            const resolvedBase64 = resolveImageToBase64(item.base64 || item.url);
+            let base64 = resolvedBase64;
+
+            if (base64 && !base64.startsWith('data:') && !base64.startsWith('http') && !base64.startsWith('/')) {
+                base64 = `data:image/png;base64,${base64}`;
+            }
+
+            return {
+                type: 'image',
+                url: item.url,
+                base64
+            };
+        }
+
+        return {
+            type: item.type,
+            url: item.url || item.base64,
+            base64: item.base64
+        };
+    }).filter(Boolean);
+}
+
+function buildCanvasContextText(canvasContext) {
+    if (!canvasContext) return '';
+    if (typeof canvasContext === 'string') return canvasContext;
+
+    const sections = [];
+    const totals = canvasContext.totals;
+    if (totals) {
+        sections.push(`Canvas totals: ${totals.totalNodes || 0} nodes; selected ${totals.selectedNodes || 0}; image ${totals.imageNodes || 0}; video ${totals.videoNodes || 0}; text ${totals.textNodes || 0}.`);
+    }
+
+    const selectedNodes = Array.isArray(canvasContext.selectedNodes) ? canvasContext.selectedNodes : [];
+    const recentNodes = Array.isArray(canvasContext.recentNodes) ? canvasContext.recentNodes : [];
+    const nodesToDescribe = selectedNodes.length ? selectedNodes : recentNodes;
+
+    if (nodesToDescribe.length) {
+        const label = selectedNodes.length ? 'Selected nodes' : 'Recent canvas nodes';
+        sections.push(`${label}:\n${nodesToDescribe.map(node => {
+            const pieces = [
+                `- ${node.title || node.type || 'Node'} (${node.type || 'unknown'})`,
+                node.status ? `status=${node.status}` : '',
+                node.prompt ? `prompt="${String(node.prompt).slice(0, 500)}"` : '',
+                node.hasResult ? 'has generated result' : '',
+                node.parentIds?.length ? `connected from ${node.parentIds.length} node(s)` : ''
+            ].filter(Boolean);
+            return pieces.join('; ');
+        }).join('\n')}`);
+    }
+
+    if (canvasContext.storyContext) {
+        sections.push(`Storyboard context: ${String(canvasContext.storyContext).slice(0, 1200)}`);
+    }
+
+    return sections.join('\n\n');
+}
+
+function sanitizeTopic(topic) {
+    return String(topic || '导演助手')
+        .replace(/["'`]/g, '')
+        .replace(/^#+\s*/g, '')
+        .split(/\r?\n/)[0]
+        .trim()
+        .slice(0, 40) || '导演助手';
+}
+
+function cleanDirectorResponse(text) {
+    return String(text || '')
+        .replace(/```(?:\w+)?\s*/g, '')
+        .replace(/```/g, '')
+        .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+        .replace(/^\s{0,3}[-*]\s+\*\*(.+?)\*\*[:：]?\s*/gm, '$1：')
+        .trim();
+}
+
+async function generateKieTopicTitle(messages, apiKey) {
+    const conversation = messagesToConversation(messages).slice(0, 6);
+    const topic = await generateKieGpt55Chat({
+        conversation,
+        apiKey,
+        model: 'gpt-5-5',
+        reasoningEffort: 'low',
+        systemPrompt: TOPIC_GENERATION_PROMPT
+    });
+
+    return sanitizeTopic(topic);
 }
 
 /**
@@ -292,54 +399,23 @@ export function getSessionData(sessionId) {
  * @param {string} sessionId - Session identifier
  * @param {string} content - User message content
  * @param {Array} media - Optional media attachments [{ type, url, base64 }, ...]
- * @param {string} apiKey - Google AI API key
+ * @param {string} apiKey - KIE API key
+ * @param {object} canvasContext - Optional compact canvas state
  * @returns {Promise<object>} { response: string, topic?: string }
  */
-export async function sendMessage(sessionId, content, media, apiKey) {
+export async function sendMessage(sessionId, content, media, apiKey, canvasContext) {
     const session = getSession(sessionId);
-    const graph = createChatGraph();
 
     // Debug: Log session state
     console.log(`[Chat] Session ${sessionId} has ${session.messages.length} existing messages`);
 
-    // Build the user message content
-    let messageContent;
-    if (media && Array.isArray(media) && media.length > 0) {
-        // Multimodal message with images/videos
-        const contentParts = [{ type: "text", text: content || "What do you see in these images?" }];
-
-        for (const m of media) {
-            // Resolve file URLs to base64 if needed
-            const resolvedBase64 = resolveImageToBase64(m.base64);
-            if (!resolvedBase64) continue;
-
-            const mimeType = m.type === 'video' ? 'video/mp4' : 'image/png';
-            // Extract base64 data if it's a data URL
-            const base64Data = resolvedBase64.includes(',')
-                ? resolvedBase64.split(',')[1]
-                : resolvedBase64;
-
-            contentParts.push({
-                type: "image_url",
-                image_url: {
-                    url: `data:${mimeType};base64,${base64Data}`,
-                },
-            });
-        }
-
-        messageContent = contentParts;
-    } else {
-        messageContent = content;
-    }
-
-    // Debug logging
-
-
     // Add user message to session
+    const hasMedia = media && Array.isArray(media) && media.length > 0;
+    const messageContent = content || (hasMedia ? '请结合这些参考素材给我创作建议。' : '');
     const userMessage = new HumanMessage(messageContent);
 
     // Attach metadata for persistence (excluding base64 to save space)
-    if (media && Array.isArray(media)) {
+    if (hasMedia) {
         userMessage.additional_kwargs = {
             ...userMessage.additional_kwargs,
             media: media.map(m => {
@@ -356,44 +432,30 @@ export async function sendMessage(sessionId, content, media, apiKey) {
 
     session.messages.push(userMessage);
 
-    console.log(`[Chat] Sending ${session.messages.length} messages to LLM`);
+    console.log(`[Chat] Sending ${session.messages.length} messages to KIE GPT-5.5`);
 
-    // Invoke the graph
-    const result = await graph.invoke(
-        { messages: session.messages },
-        { configurable: { apiKey } }
-    );
+    const responseText = cleanDirectorResponse(await generateKieGpt55Chat({
+        conversation: messagesToConversation(session.messages),
+        media: normalizeMediaForModel(media),
+        canvasContext: buildCanvasContextText(canvasContext),
+        systemPrompt: CHAT_AGENT_SYSTEM_PROMPT,
+        apiKey,
+        model: 'gpt-5-5',
+        reasoningEffort: 'medium'
+    }));
 
-    // Extract AI response from result
-    const aiResponse = result.messages[result.messages.length - 1];
+    const aiResponse = new AIMessage(responseText);
     session.messages.push(aiResponse);
-
-    // Convert the multimodal user message to text for future context
-    // This ensures the AI remembers what images contained in subsequent turns
-    if (typeof messageContent !== 'string') {
-        const textVersion = contentToText(messageContent);
-        // Replace the last user message with text version but keep metadata
-        const userMsgIndex = session.messages.length - 2;
-        const originalMsg = session.messages[userMsgIndex];
-
-        const newMsg = new HumanMessage(textVersion);
-        if (originalMsg.additional_kwargs) {
-            newMsg.additional_kwargs = originalMsg.additional_kwargs;
-        }
-        session.messages[userMsgIndex] = newMsg;
-
-        session.messages[userMsgIndex] = newMsg;
-    }
 
     // Generate topic if this is the first exchange (2 messages: user + AI)
     let topic = session.topic;
     if (session.messages.length === 2 && !session.topic) {
         try {
-            topic = await generateTopicTitle(session.messages, apiKey);
+            topic = await generateKieTopicTitle(session.messages, apiKey);
             session.topic = topic;
         } catch (err) {
             console.error("Failed to generate topic:", err);
-            topic = "New Chat";
+            topic = "导演助手";
         }
     }
 
@@ -401,7 +463,7 @@ export async function sendMessage(sessionId, content, media, apiKey) {
     saveSession(sessionId, session);
 
     return {
-        response: aiResponse.content.toString(),
+        response: responseText,
         topic: topic,
         messageCount: session.messages.length,
     };
@@ -411,14 +473,10 @@ export async function sendMessage(sessionId, content, media, apiKey) {
 // EXPORTS
 // ============================================================================
 
-export { createChatGraph, generateTopicTitle };
-
 export default {
     getSession,
     deleteSession,
     listSessions,
     getSessionData,
     sendMessage,
-    createChatGraph,
-    generateTopicTitle,
 };

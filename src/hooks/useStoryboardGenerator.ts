@@ -110,6 +110,25 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
         });
     }, []);
 
+    const openWithCharacters = useCallback((characters: CharacterAsset[]) => {
+        setIsModalOpen(true);
+        setState({
+            step: 'story',
+            selectedCharacters: characters.slice(0, 3),
+            sceneCount: 3,
+            story: '',
+            scripts: [],
+            styleAnchor: '',
+            characterDNA: {},
+            compositeImageUrl: null,
+            isGeneratingPreview: false,
+            isGenerating: false,
+            isBrainstorming: false,
+            isOptimizing: false,
+            error: null
+        });
+    }, []);
+
     const closeModal = useCallback(() => {
         setIsModalOpen(false);
     }, []);
@@ -415,9 +434,9 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
                 prompt,
                 // Set to IDLE - handleGenerate will set to LOADING when called
                 status: NodeStatus.IDLE,
-                // Default to Nano Banana Pro (gemini-3-pro-image-preview)
-                model: 'gemini-pro',
-                imageModel: 'gemini-3-pro-image-preview',
+                // Default to Kie GPT Image 2.
+                model: 'gpt-image-2',
+                imageModel: 'gpt-image-2',
                 aspectRatio: '16:9',
                 resolution: '1K',
                 title: `Scene ${sceneNumber}`,
@@ -470,6 +489,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
     return {
         isModalOpen,
         openModal,
+        openWithCharacters,
         closeModal,
         editStoryboard,
         state,

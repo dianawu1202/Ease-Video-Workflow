@@ -10,7 +10,6 @@ import { NodeData, NodeStatus, NodeType } from '../../types';
 import { NodeConnectors } from './NodeConnectors';
 import { NodeContent } from './NodeContent';
 import { NodeControls } from './NodeControls';
-import { ChangeAnglePanel } from './ChangeAnglePanel';
 import { VideoCanvasNode } from './VideoCanvasNode';
 
 interface CanvasNodeProps {
@@ -19,6 +18,7 @@ interface CanvasNodeProps {
   connectedImageNodes?: { id: string; url: string; type?: NodeType }[]; // For frame-to-frame video mode and motion control
   onUpdate: (id: string, updates: Partial<NodeData>) => void;
   onGenerate: (id: string) => void;
+  onCancelGeneration?: (id: string) => void;
   onAddNext: (id: string, type: 'left' | 'right') => void;
   onStartReferencePick?: (id: string) => void;
   isPickingReference?: boolean;
@@ -41,7 +41,8 @@ interface CanvasNodeProps {
   // Image node callbacks
   onImageToImage?: (nodeId: string) => void;
   onImageToVideo?: (nodeId: string) => void;
-  onChangeAngleGenerate?: (nodeId: string) => void;
+  onMakeCharacterTurnaround?: (nodeId: string) => void;
+  onCreateStoryboardFromImage?: (nodeId: string) => void;
   zoom: number;
   // Mouse event callbacks for chat panel drag functionality
   onMouseEnter?: () => void;
@@ -59,6 +60,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   connectedImageNodes,
   onUpdate,
   onGenerate,
+  onCancelGeneration,
   onAddNext,
   onStartReferencePick,
   isPickingReference = false,
@@ -79,7 +81,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   onTextToImage,
   onImageToImage,
   onImageToVideo,
-  onChangeAngleGenerate,
+  onMakeCharacterTurnaround,
+  onCreateStoryboardFromImage,
   zoom,
   onMouseEnter,
   onMouseLeave,
@@ -210,6 +213,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
         showControls={showControls}
         onUpdate={onUpdate}
         onGenerate={onGenerate}
+        onCancelGeneration={onCancelGeneration}
         onSelect={onSelect}
         onStartReferencePick={onStartReferencePick}
         isPickingReference={isPickingReference}
@@ -219,7 +223,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
         onExpand={onExpand}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
-        onChangeAngleGenerate={onChangeAngleGenerate}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
         onPostToX={onPostToX}
@@ -317,28 +320,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
               }}
             >
               <div className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900/95 rounded-full border border-neutral-700 shadow-xl backdrop-blur-md">
-                {/* Change Angle Button - Re-enable tweaking */}
-                <button
-                  onClick={() => onUpdate(data.id, {
-                    angleMode: !data.angleMode,
-                    angleSettings: data.angleSettings || { rotation: 0, tilt: 0, scale: 0, wideAngle: false }
-                  })}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${data.angleMode
-                    ? 'bg-blue-500 text-white'
-                    : 'text-neutral-300 hover:bg-neutral-700 hover:text-white'
-                    }`}
-                >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                    <line x1="12" y1="22.08" x2="12" y2="12" />
-                  </svg>
-                  Change Angle
-                </button>
-                {/* Separator */}
-                <div className="w-px h-4 bg-neutral-600 mx-1" />
-
                 {/* Expand Button */}
                 <button
                   onClick={() => onExpand?.(data.resultUrl!)}
@@ -351,17 +332,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
                     <polyline points="9 21 3 21 3 15" />
                     <line x1="21" y1="3" x2="14" y2="10" />
                     <line x1="3" y1="21" x2="10" y2="14" />
-                  </svg>
-                </button>
-                {/* Post to X Button */}
-                <button
-                  onClick={(e) => { e.stopPropagation(); onPostToX?.(data.id, data.resultUrl!, 'image'); }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                  title="Post to X"
-                >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="currentColor">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                   </svg>
                 </button>
                 {/* Download Button */}
@@ -413,32 +383,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
                 </button>
-                {/* Drag to Chat Handle */}
-                <div
-                  draggable
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('application/json', JSON.stringify({
-                      nodeId: data.id,
-                      url: data.resultUrl,
-                      type: 'image'
-                    }));
-                    e.dataTransfer.effectAllowed = 'copy';
-                    onDragStart?.(data.id, true);
-                  }}
-                  onDragEnd={() => onDragEnd?.()}
-                  className="p-1.5 bg-cyan-500/80 hover:bg-cyan-400 rounded-full text-white cursor-grab active:cursor-grabbing"
-                  title="Drag to chat"
-                >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="9" cy="5" r="1" fill="currentColor" />
-                    <circle cx="9" cy="12" r="1" fill="currentColor" />
-                    <circle cx="9" cy="19" r="1" fill="currentColor" />
-                    <circle cx="15" cy="5" r="1" fill="currentColor" />
-                    <circle cx="15" cy="12" r="1" fill="currentColor" />
-                    <circle cx="15" cy="19" r="1" fill="currentColor" />
-                  </svg>
-                </div>
               </div>
             </div>
           )}
@@ -475,30 +419,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
               )}
             </div>
           </div>
-
-          {/* Control Panel (Only for re-adjusting angle if needed) */}
-          {selected && showControls && data.angleMode && data.resultUrl && (
-            <div className="absolute top-[calc(100%+12px)] left-1/2 -translate-x-1/2 flex justify-center z-[100]">
-              <div
-                style={{
-                  transform: `scale(${localScale})`,
-                  transformOrigin: 'top center',
-                  transition: 'transform 0.1s ease-out'
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <ChangeAnglePanel
-                  imageUrl={data.resultUrl}
-                  settings={data.angleSettings || { rotation: 0, tilt: 0, scale: 0, wideAngle: false }}
-                  onSettingsChange={(settings) => onUpdate(data.id, { angleSettings: settings })}
-                  onClose={() => onUpdate(data.id, { angleMode: false })}
-                  onGenerate={onChangeAngleGenerate ? () => onChangeAngleGenerate(data.id) : () => { }}
-                  isLoading={isLoading}
-                  canvasTheme={canvasTheme}
-                />
-              </div>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -607,27 +527,43 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
             }}
           >
             <div className="flex items-center gap-1 px-2 py-1.5 bg-neutral-900/95 rounded-full border border-neutral-700 shadow-xl backdrop-blur-md">
-              {/* Change Angle and Upload buttons - Hidden for storyboard-generated scenes */}
+              {/* Character tools and Upload buttons - Hidden for storyboard-generated scenes */}
               {!(data.prompt && data.prompt.startsWith('Extract panel #')) && (
                 <>
-                  {/* Change Angle Button */}
+                  {/* Character Turnaround Button */}
                   <button
-                    onClick={() => onUpdate(data.id, {
-                      angleMode: !data.angleMode,
-                      angleSettings: data.angleSettings || { rotation: 0, tilt: 0, scale: 0, wideAngle: false }
-                    })}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMakeCharacterTurnaround?.(data.id);
+                    }}
                     onPointerDown={(e) => e.stopPropagation()}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${data.angleMode
-                      ? 'bg-blue-500 text-white'
-                      : 'text-neutral-300 hover:bg-neutral-700 hover:text-white'
-                      }`}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors"
+                    title="制作角色三视图"
                   >
                     <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                      <line x1="12" y1="22.08" x2="12" y2="12" />
+                      <rect x="3" y="5" width="5" height="14" rx="1.5" />
+                      <rect x="9.5" y="5" width="5" height="14" rx="1.5" />
+                      <rect x="16" y="5" width="5" height="14" rx="1.5" />
                     </svg>
-                    Change Angle
+                    角色三视图
+                  </button>
+                  {/* Storyboard Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCreateStoryboardFromImage?.(data.id);
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors"
+                    title="制作分镜"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="4" width="7" height="6" rx="1" />
+                      <rect x="14" y="4" width="7" height="6" rx="1" />
+                      <rect x="3" y="14" width="7" height="6" rx="1" />
+                      <rect x="14" y="14" width="7" height="6" rx="1" />
+                    </svg>
+                    制作分镜
                   </button>
                   {/* Separator */}
                   <div className="w-px h-4 bg-neutral-600 mx-1" />
@@ -680,17 +616,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
                   <line x1="3" y1="21" x2="10" y2="14" />
                 </svg>
               </button>
-              {/* Post to X Button */}
-              <button
-                onClick={(e) => { e.stopPropagation(); onPostToX?.(data.id, data.resultUrl!, 'image'); }}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                title="Post to X"
-              >
-                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="currentColor">
-                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                </svg>
-              </button>
               {/* Download Button */}
               <button
                 onClick={(e) => {
@@ -740,32 +665,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
               </button>
-              {/* Drag to Chat Handle */}
-              <div
-                draggable
-                onPointerDown={(e) => e.stopPropagation()}
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('application/json', JSON.stringify({
-                    nodeId: data.id,
-                    url: data.resultUrl,
-                    type: 'image'
-                  }));
-                  e.dataTransfer.effectAllowed = 'copy';
-                  onDragStart?.(data.id, true);
-                }}
-                onDragEnd={() => onDragEnd?.()}
-                className="p-1.5 bg-cyan-500/80 hover:bg-cyan-400 rounded-full text-white cursor-grab active:cursor-grabbing"
-                title="Drag to chat"
-              >
-                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="9" cy="5" r="1" fill="currentColor" />
-                  <circle cx="9" cy="12" r="1" fill="currentColor" />
-                  <circle cx="9" cy="19" r="1" fill="currentColor" />
-                  <circle cx="15" cy="5" r="1" fill="currentColor" />
-                  <circle cx="15" cy="12" r="1" fill="currentColor" />
-                  <circle cx="15" cy="19" r="1" fill="currentColor" />
-                </svg>
-              </div>
             </div>
           </div>
         )}
@@ -943,6 +842,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
             onTextToImage={onTextToImage}
             onImageToImage={onImageToImage}
             onImageToVideo={onImageToVideo}
+            onGenerate={onGenerate}
+            onCancelGeneration={onCancelGeneration}
             onUpdate={onUpdate}
             onPostToX={onPostToX}
           />
@@ -960,7 +861,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
               connectedImageNodes={connectedImageNodes}
               onUpdate={onUpdate}
               onGenerate={onGenerate}
-              onChangeAngleGenerate={onChangeAngleGenerate}
               onSelect={onSelect}
               zoom={zoom}
               canvasTheme={canvasTheme}

@@ -34,6 +34,7 @@ const VIDEO_DURATIONS = [5, 6, 8, 10];
 const VIDEO_RESOLUTIONS = ["Auto", "1080p", "768p", "720p", "512p"];
 
 const VIDEO_MODELS = [
+    { id: 'seedance-2-0-mini', name: 'Seedance 2.0 Mini', provider: 'bytedance', recommended: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'] },
     {
         id: 'veo-3.1',
         name: 'Veo 3.1',
@@ -47,7 +48,7 @@ const VIDEO_MODELS = [
             8: ['Auto', '720p', '1080p']
         }
     },
-    { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling', recommended: true, durations: [5, 10], resolutions: ['Auto', '720p', '1080p'] },
+    { id: 'kling-v2-1', name: 'Kling V2.1', provider: 'kling', durations: [5, 10], resolutions: ['Auto', '720p', '1080p'] },
     { id: 'kling-v2-1-master', name: 'Kling V2.1 Master', provider: 'kling', durations: [5, 10], resolutions: ['Auto', '720p', '1080p'] },
     { id: 'kling-v2-5-turbo', name: 'Kling V2.5 Turbo', provider: 'kling', durations: [5, 10], resolutions: ['Auto', '720p', '1080p'] },
     { id: 'kling-v2-6', name: 'Kling 2.6 (Motion)', provider: 'kling', durations: [5, 10], resolutions: ['Auto', '720p', '1080p'] },
@@ -79,12 +80,13 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
 
     const [prompts, setPrompts] = useState<Record<string, string>>({});
     const [settings, setSettings] = useState({
-        model: 'veo-3.1',
-        duration: 4, // Default to 4s for Veo
-        resolution: '720p' // Safe default
+        model: 'seedance-2-0-mini',
+        duration: 5,
+        resolution: 'Auto'
     });
     const [generatingPrompts, setGeneratingPrompts] = useState<Record<string, boolean>>({});
     const [optimizingPrompts, setOptimizingPrompts] = useState<Record<string, boolean>>({});
+    const [promptErrors, setPromptErrors] = useState<Record<string, string>>({});
     const [showModelDropdown, setShowModelDropdown] = useState(false);
     const modelDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -159,15 +161,29 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                 }
             });
             setPrompts(initialPrompts);
+            setPromptErrors({});
         }
     }, [isOpen, scenes]);
+
+    const getApiErrorMessage = async (response: Response, fallback: string) => {
+        try {
+            const data = await response.json();
+            return data?.error || data?.message || fallback;
+        } catch {
+            return fallback;
+        }
+    };
 
     // Handle single prompt generation using Gemini
     const handleGeneratePrompt = async (nodeId: string) => {
         const scene = scenes.find(s => s.id === nodeId);
-        if (!scene || !scene.resultUrl) return;
+        if (!scene || !scene.resultUrl) {
+            setPromptErrors(prev => ({ ...prev, [nodeId]: 'Scene image is missing. Regenerate the scene image first.' }));
+            return;
+        }
 
         setGeneratingPrompts(prev => ({ ...prev, [nodeId]: true }));
+        setPromptErrors(prev => ({ ...prev, [nodeId]: '' }));
 
         try {
             // Using a simple text generation endpoint that supports image input
@@ -197,13 +213,23 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                 })
             });
 
-            if (!response.ok) throw new Error('Failed to generate prompt');
+            if (!response.ok) {
+                throw new Error(await getApiErrorMessage(response, 'Failed to generate prompt'));
+            }
 
             const data = await response.json();
-            setPrompts(prev => ({ ...prev, [nodeId]: data.description }));
+            const generatedPrompt = String(data.description || '').trim();
+            if (!generatedPrompt) {
+                throw new Error('AI returned an empty prompt. Please try again.');
+            }
+
+            setPrompts(prev => ({ ...prev, [nodeId]: generatedPrompt }));
         } catch (error) {
             console.error('Prompt generation failed:', error);
-            // Fallback or error notification could go here
+            setPromptErrors(prev => ({
+                ...prev,
+                [nodeId]: error instanceof Error ? error.message : 'Prompt generation failed'
+            }));
         } finally {
             setGeneratingPrompts(prev => ({ ...prev, [nodeId]: false }));
         }
@@ -211,10 +237,14 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
 
     // Handle optimizing manually entered prompts using Gemini
     const handleOptimizePrompt = async (nodeId: string) => {
-        const currentPrompt = prompts[nodeId];
-        if (!currentPrompt) return; // Nothing to optimize
+        const currentPrompt = prompts[nodeId]?.trim();
+        if (!currentPrompt) {
+            await handleGeneratePrompt(nodeId);
+            return;
+        }
 
         setOptimizingPrompts(prev => ({ ...prev, [nodeId]: true }));
+        setPromptErrors(prev => ({ ...prev, [nodeId]: '' }));
 
         try {
             const response = await fetch('/api/gemini/optimize-prompt', {
@@ -225,13 +255,23 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                 })
             });
 
-            if (!response.ok) throw new Error('Failed to optimize prompt');
+            if (!response.ok) {
+                throw new Error(await getApiErrorMessage(response, 'Failed to optimize prompt'));
+            }
 
             const data = await response.json();
-            setPrompts(prev => ({ ...prev, [nodeId]: data.optimizedPrompt }));
+            const optimizedPrompt = String(data.optimizedPrompt || '').trim();
+            if (!optimizedPrompt) {
+                throw new Error('AI returned an empty optimized prompt. Please try again.');
+            }
+
+            setPrompts(prev => ({ ...prev, [nodeId]: optimizedPrompt }));
         } catch (error) {
             console.error('Prompt optimization failed:', error);
-            // Fallback or error notification could go here
+            setPromptErrors(prev => ({
+                ...prev,
+                [nodeId]: error instanceof Error ? error.message : 'Prompt optimization failed'
+            }));
         } finally {
             setOptimizingPrompts(prev => ({ ...prev, [nodeId]: false }));
         }
@@ -338,8 +378,10 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                             <label className="text-xs font-medium text-neutral-400">Video Prompt</label>
                                             <div className="flex items-center gap-2">
                                                 <button
-                                                    onClick={() => handleOptimizePrompt(scene.id)}
-                                                    disabled={generatingPrompts[scene.id] || optimizingPrompts[scene.id] || !prompts[scene.id]}
+                                                    type="button"
+                                                    onPointerDown={(e) => e.stopPropagation()}
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOptimizePrompt(scene.id); }}
+                                                    disabled={generatingPrompts[scene.id] || optimizingPrompts[scene.id]}
                                                     className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
                                                     title="Enhance your prompt with AI"
                                                 >
@@ -355,7 +397,10 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                         <div className="relative flex-1">
                                             <textarea
                                                 value={prompts[scene.id] || ''}
-                                                onChange={(e) => setPrompts(prev => ({ ...prev, [scene.id]: e.target.value }))}
+                                                onChange={(e) => {
+                                                    setPrompts(prev => ({ ...prev, [scene.id]: e.target.value }));
+                                                    setPromptErrors(prev => ({ ...prev, [scene.id]: '' }));
+                                                }}
                                                 placeholder="Describe the motion for this scene (e.g., 'Slow pan right, character smiles')..."
                                                 className="w-full h-full min-h-[100px] bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm text-neutral-200 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 resize-none"
                                             />
@@ -364,7 +409,9 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                             {(!prompts[scene.id] || prompts[scene.id].trim() === '') && (
                                                 <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
                                                     <button
-                                                        onClick={() => handleGeneratePrompt(scene.id)}
+                                                        type="button"
+                                                        onPointerDown={(e) => e.stopPropagation()}
+                                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleGeneratePrompt(scene.id); }}
                                                         disabled={generatingPrompts[scene.id]}
                                                         className="pointer-events-auto flex items-center gap-2 text-purple-400 hover:text-purple-300 hover:scale-105 transition-all opacity-80 hover:opacity-100"
                                                     >
@@ -378,6 +425,11 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                                 </div>
                                             )}
                                         </div>
+                                        {promptErrors[scene.id] && (
+                                            <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                                                {promptErrors[scene.id]}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -412,8 +464,27 @@ export const StoryboardVideoModal: React.FC<StoryboardVideoModalProps> = ({
                                     {showModelDropdown && (
                                         <div className="absolute bottom-full mb-2 left-0 w-64 bg-[#1f1f1f] border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[400px] overflow-y-auto">
 
+                                            {/* Seedance */}
+                                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1a1a1a]">Kie / ByteDance</div>
+                                            {VIDEO_MODELS.filter(m => m.provider === 'bytedance').map(model => (
+                                                <button
+                                                    key={model.id}
+                                                    onClick={() => handleModelChange(model.id)}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 text-xs hover:bg-[#2a2a2a] transition-colors ${settings.model === model.id ? 'text-blue-400 bg-blue-500/10' : 'text-neutral-300'}`}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <Film size={14} className="text-pink-300" />
+                                                        {model.name}
+                                                        {model.recommended && (
+                                                            <span className="text-[9px] px-1 py-0.5 bg-green-500/20 text-green-400 rounded font-medium">REC</span>
+                                                        )}
+                                                    </div>
+                                                    {settings.model === model.id && <Check size={14} />}
+                                                </button>
+                                            ))}
+
                                             {/* Google */}
-                                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1a1a1a]">Google</div>
+                                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1a1a1a] border-t border-neutral-700">Google</div>
                                             {VIDEO_MODELS.filter(m => m.provider === 'google').map(model => (
                                                 <button
                                                     key={model.id}

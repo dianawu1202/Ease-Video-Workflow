@@ -1,13 +1,12 @@
 /**
  * useImageNodeHandlers.ts
  * 
- * Handles Image node menu actions (Image to Image, Image to Video, Change Angle).
+ * Handles Image node menu actions.
  * Creates connected nodes when users select these options from the placeholder.
  */
 
 import React from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
-import { generateCameraAngle } from '../services/cameraAngleService';
 
 // ============================================================================
 // TYPES
@@ -51,8 +50,9 @@ export const useImageNodeHandlers = ({
             prompt: '',
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
-            aspectRatio: 'Auto',
-            resolution: 'Auto',
+            imageModel: 'gpt-image-2',
+            aspectRatio: '9:16',
+            resolution: '1K',
             parentIds: [nodeId] // Connect to the source image node
         };
 
@@ -82,6 +82,7 @@ export const useImageNodeHandlers = ({
             prompt: '',
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
+            videoModel: 'seedance-2-0-mini',
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: [nodeId] // Connect to the source image node
@@ -93,98 +94,47 @@ export const useImageNodeHandlers = ({
     };
 
     /**
-     * Handle "Change Angle Generate" - calls Modal Camera Angle API
-     * Creates a new Image node with the transformed result
+     * Create a character turnaround sheet from the current image.
+     * Uses the source image as a visual reference and auto-starts generation.
      */
-    const handleChangeAngleGenerate = React.useCallback(async (nodeId: string) => {
+    const handleMakeCharacterTurnaround = (nodeId: string) => {
         const imageNode = nodes.find(n => n.id === nodeId);
-        if (!imageNode || !imageNode.angleSettings || !imageNode.resultUrl) {
-            console.error('[ChangeAngle] Missing required data:', {
-                hasNode: !!imageNode,
-                hasSettings: !!imageNode?.angleSettings,
-                hasResultUrl: !!imageNode?.resultUrl
-            });
-            return;
-        }
+        if (!imageNode?.resultUrl) return;
 
-        // Create Image node to the right
         const newNodeId = crypto.randomUUID();
         const GAP = 100;
-        const NODE_WIDTH = 340;
+        const NODE_WIDTH = 365;
 
-        // Create placeholder node in LOADING state
-        const newImageNode: NodeData = {
+        const prompt = [
+            'Using the connected image as the exact character reference, create a professional character turnaround sheet.',
+            'Show the same character in three views: front view, side view, and back view, aligned in one clean layout.',
+            'Keep the character identity, outfit, colors, proportions, facial features, and style consistent.',
+            'Use a neutral studio background, full body if visible, no extra characters, no labels, no text.'
+        ].join(' ');
+
+        const turnaroundNode: NodeData = {
             id: newNodeId,
-            type: NodeType.CAMERA_ANGLE,
+            type: NodeType.IMAGE,
             x: imageNode.x + NODE_WIDTH + GAP,
             y: imageNode.y,
-            // Prompt is stored for reference but not displayed in the specialized node
-            prompt: `Camera angle: rotation=${imageNode.angleSettings.rotation}°, tilt=${imageNode.angleSettings.tilt}°`,
-            status: NodeStatus.LOADING,
-            model: 'Qwen Camera Angle',
-            imageModel: 'qwen-camera-angle',
-            aspectRatio: imageNode.aspectRatio || 'Auto',
-            resolution: imageNode.resolution || 'Auto',
-            parentIds: [nodeId], // Connect to source
-
-            // Persist angle settings to the new node so controls can be re-opened with same state
-            angleSettings: imageNode.angleSettings,
-            angleMode: false
+            prompt,
+            status: NodeStatus.IDLE,
+            model: 'gpt-image-2',
+            imageModel: 'gpt-image-2',
+            aspectRatio: '16:9',
+            resolution: '1K',
+            title: '角色三视图',
+            parentIds: [nodeId]
         };
 
-        // Add new node and close angle mode on source
-        setNodes(prev => [
-            ...prev.map(n => n.id === nodeId ? { ...n, angleMode: false } : n),
-            newImageNode
-        ]);
+        setNodes(prev => [...prev, turnaroundNode]);
         setSelectedNodeIds([newNodeId]);
-
-        // Call Modal API
-        try {
-            console.log('[ChangeAngle] Calling Modal API with settings:', imageNode.angleSettings);
-
-            const result = await generateCameraAngle(
-                imageNode.resultUrl,
-                imageNode.angleSettings.rotation,
-                imageNode.angleSettings.tilt,
-                imageNode.angleSettings.scale
-            );
-
-            console.log('[ChangeAngle] API success:', {
-                seed: result.seed,
-                inferenceTimeMs: result.inferenceTimeMs
-            });
-
-            // Update node with result
-            setNodes(prev => prev.map(n =>
-                n.id === newNodeId
-                    ? {
-                        ...n,
-                        status: NodeStatus.SUCCESS,
-                        resultUrl: result.imageUrl,
-                        seed: result.seed
-                    }
-                    : n
-            ));
-        } catch (error: any) {
-            console.error('[ChangeAngle] API error:', error);
-
-            // Update node with error
-            setNodes(prev => prev.map(n =>
-                n.id === newNodeId
-                    ? {
-                        ...n,
-                        status: NodeStatus.ERROR,
-                        errorMessage: error.message || 'Camera angle generation failed'
-                    }
-                    : n
-            ));
-        }
-    }, [nodes, setNodes, setSelectedNodeIds]);
+        window.setTimeout(() => onGenerateNode?.(newNodeId), 150);
+    };
 
     return {
         handleImageToImage,
         handleImageToVideo,
-        handleChangeAngleGenerate
+        handleMakeCharacterTurnaround
     };
 };

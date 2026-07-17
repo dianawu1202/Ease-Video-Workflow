@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Film, GripVertical, Loader2, Maximize2, Play, Video } from 'lucide-react';
+import { AlertCircle, Film, GripVertical, Loader2, Maximize2, Play, RotateCcw, Square, Video } from 'lucide-react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { NodeConnectors } from './NodeConnectors';
 import { VideoGenerationPanel } from './VideoGenerationPanel';
@@ -18,6 +18,7 @@ interface VideoCanvasNodeProps {
   showControls?: boolean;
   onUpdate: (id: string, updates: Partial<NodeData>) => void;
   onGenerate: (id: string) => void;
+  onCancelGeneration?: (id: string) => void;
   onSelect: (id: string) => void;
   onStartReferencePick?: (id: string) => void;
   isPickingReference?: boolean;
@@ -27,7 +28,6 @@ interface VideoCanvasNodeProps {
   onExpand?: (imageUrl: string) => void;
   onDragStart?: (nodeId: string, hasContent: boolean) => void;
   onDragEnd?: () => void;
-  onChangeAngleGenerate?: (nodeId: string) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   onPostToX?: (nodeId: string, mediaUrl: string, mediaType: 'image' | 'video') => void;
@@ -44,6 +44,7 @@ export const VideoCanvasNode: React.FC<VideoCanvasNodeProps> = ({
   showControls = true,
   onUpdate,
   onGenerate,
+  onCancelGeneration,
   onSelect,
   onStartReferencePick,
   isPickingReference = false,
@@ -53,7 +54,6 @@ export const VideoCanvasNode: React.FC<VideoCanvasNodeProps> = ({
   onExpand,
   onDragStart,
   onDragEnd,
-  onChangeAngleGenerate,
   onMouseEnter,
   onMouseLeave,
   onPostToX,
@@ -68,6 +68,7 @@ export const VideoCanvasNode: React.FC<VideoCanvasNodeProps> = ({
   const isDark = canvasTheme === 'dark';
   const isLoading = data.status === NodeStatus.LOADING;
   const isSuccess = data.status === NodeStatus.SUCCESS;
+  const isError = data.status === NodeStatus.ERROR;
   const hasVideo = Boolean(data.resultUrl);
   const hasInputPreview = Boolean(inputUrl && !hasVideo);
   const shouldShowControls = selected && showControls && !(data.prompt && data.prompt.startsWith('Extract panel #'));
@@ -288,6 +289,36 @@ export const VideoCanvasNode: React.FC<VideoCanvasNodeProps> = ({
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
                 <Loader2 size={42} className="animate-spin text-neutral-200" />
                 <span className="mt-3 text-sm font-medium text-neutral-200">Generating video...</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCancelGeneration?.(data.id);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="mt-3 flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/20"
+                >
+                  <Square size={12} className="fill-current" />
+                  Stop
+                </button>
+              </div>
+            ) : isError ? (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/65 px-8 text-center backdrop-blur-sm">
+                <AlertCircle size={36} className="text-red-400" />
+                <div className="mt-3 text-sm font-semibold text-red-100">Generation failed</div>
+                <div className="mt-1 max-w-md text-xs leading-relaxed text-neutral-300">
+                  {data.errorMessage || 'Generation failed. Click retry to generate again.'}
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onGenerate(data.id);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="mt-4 flex items-center gap-1.5 rounded-full bg-blue-500 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-400"
+                >
+                  <RotateCcw size={13} />
+                  Retry
+                </button>
               </div>
             ) : !hasVideo ? (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-neutral-500">

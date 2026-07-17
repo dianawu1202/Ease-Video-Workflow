@@ -12,6 +12,7 @@ import { generateKlingVideo, generateKlingImage, generateKlingMultiImage } from 
 import { generateGeminiImage, generateVeoVideo } from '../services/gemini.js';
 import { generateHailuoVideo } from '../services/hailuo.js';
 import { generateOpenAIImage } from '../services/openai.js';
+import { generateKieImage, generateKieKlingVideo, generateKieSeedanceVideo } from '../services/kie.js';
 import { resolveImageToBase64, saveBufferToFile } from '../utils/imageHelpers.js';
 
 const router = express.Router();
@@ -23,16 +24,53 @@ const router = express.Router();
 router.post('/generate-image', async (req, res) => {
     try {
         const { nodeId, prompt, aspectRatio, resolution, imageBase64: rawImageBase64, imageModel, klingReferenceMode, klingFaceIntensity, klingSubjectIntensity } = req.body;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, IMAGES_DIR } = req.app.locals;
+        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, OPENAI_API_KEY, KIE_API_KEY, IMAGES_DIR } = req.app.locals;
 
         // Determine provider
         const isKlingModel = imageModel && imageModel.startsWith('kling-');
-        const isOpenAIModel = imageModel && imageModel.startsWith('gpt-image-');
+        const isKieImageModel = imageModel === 'gpt-image-2';
+        const isOpenAIModel = imageModel && imageModel.startsWith('gpt-image-') && !isKieImageModel;
 
         let imageBuffer;
         let imageFormat = 'png';
 
-        if (isKlingModel) {
+        if (isKieImageModel) {
+            // --- KIE GPT IMAGE 2 GENERATION ---
+            if (!KIE_API_KEY) {
+                return res.status(500).json({
+                    error: "Kie API key not configured. Add KIE_API_KEY to .env"
+                });
+            }
+
+            console.log(`Using Kie GPT Image 2 model: ${imageModel}`);
+
+            let imageBase64Array = null;
+            if (rawImageBase64) {
+                const rawImages = Array.isArray(rawImageBase64) ? rawImageBase64 : [rawImageBase64];
+                imageBase64Array = rawImages.map(img => resolveImageToBase64(img)).filter(Boolean);
+            }
+
+            const kieImageUrl = await generateKieImage({
+                prompt,
+                imageBase64Array,
+                aspectRatio,
+                resolution,
+                apiKey: KIE_API_KEY
+            });
+
+            const imageResponse = await fetch(kieImageUrl);
+            if (!imageResponse.ok) {
+                throw new Error('Failed to download image from Kie');
+            }
+            imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+            if (kieImageUrl.includes('.jpg') || kieImageUrl.includes('.jpeg')) {
+                imageFormat = 'jpg';
+            } else if (kieImageUrl.includes('.webp')) {
+                imageFormat = 'webp';
+            }
+
+        } else if (isKlingModel) {
             // --- KLING AI IMAGE GENERATION ---
             if (!KLING_ACCESS_KEY || !KLING_SECRET_KEY) {
                 return res.status(500).json({
@@ -187,7 +225,7 @@ router.post('/generate-image', async (req, res) => {
 router.post('/generate-video', async (req, res) => {
     try {
         const { nodeId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, aspectRatio, resolution, duration, videoModel } = req.body;
-        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, VIDEOS_DIR } = req.app.locals;
+        const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, KIE_API_KEY, VIDEOS_DIR } = req.app.locals;
 
         // Resolve file URLs to base64
         const imageBase64 = resolveImageToBase64(rawImageBase64);
@@ -195,64 +233,116 @@ router.post('/generate-video', async (req, res) => {
         const motionReferenceUrl = resolveImageToBase64(rawMotionReferenceUrl);
 
         // Determine provider
-        const isKlingModel = videoModel && videoModel.startsWith('kling-');
-        const isHailuoModel = videoModel && videoModel.startsWith('hailuo-');
+        const selectedVideoModel = videoModel || 'seedance-2-0-mini';
+        const isSeedanceModel = selectedVideoModel === 'seedance-2-0-mini';
+        const isKlingModel = selectedVideoModel.startsWith('kling-');
+        const isHailuoModel = selectedVideoModel.startsWith('hailuo-');
 
         let videoBuffer;
 
-        if (isKlingModel) {
+        if (isSeedanceModel) {
+            // --- SEEDANCE 2.0 MINI VIA KIE ---
+            if (!KIE_API_KEY) {
+                return res.status(500).json({
+                    error: "Kie API key not configured. Add KIE_API_KEY to .env"
+                });
+            }
+
+            console.log(`\n[Route] Seedance 2.0 Mini detected - routing to Kie`);
+            console.log(`[Route] First frame: ${imageBase64 ? 'YES (' + Math.round(imageBase64.length / 1024) + ' KB)' : 'NO'}`);
+            console.log(`[Route] Last frame: ${lastFrameBase64 ? 'YES (' + Math.round(lastFrameBase64.length / 1024) + ' KB)' : 'NO'}`);
+            console.log(`[Route] Reference video: ${motionReferenceUrl ? 'YES (' + Math.round(motionReferenceUrl.length / 1024) + ' KB)' : 'NO'}`);
+            console.log(`[Route] Duration: ${duration || 5}s`);
+            console.log(`[Route] Generate Audio: ${req.body.generateAudio !== false}`);
+
+            const seedanceVideoUrl = await generateKieSeedanceVideo({
+                prompt,
+                imageBase64,
+                lastFrameBase64,
+                motionReferenceUrl,
+                aspectRatio,
+                resolution,
+                duration: duration || 5,
+                generateAudio: req.body.generateAudio !== false,
+                apiKey: KIE_API_KEY
+            });
+
+            const videoResponse = await fetch(seedanceVideoUrl);
+            if (!videoResponse.ok) {
+                throw new Error('Failed to download video from Kie Seedance');
+            }
+            videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+        } else if (isKlingModel) {
             // --- KLING AI VIDEO GENERATION ---
 
             // Check if this is a Kling 2.6 model (route to Fal.ai - official API doesn't support v2.6)
-            const isKling26 = videoModel === 'kling-v2-6';
+            const isKling26 = selectedVideoModel === 'kling-v2-6';
             // Check if this is a motion control request (kling-v2-6 with motion reference)
             const isMotionControl = isKling26 && motionReferenceUrl;
 
             let resultVideoUrl;
 
             if (isKling26) {
-                // --- KLING 2.6 VIA FAL.AI ---
-                // Official Kling API doesn't support v2.6, use fal.ai instead
-                const { FAL_API_KEY } = req.app.locals;
-
-                if (!FAL_API_KEY) {
-                    return res.status(500).json({
-                        error: "FAL_API_KEY not configured. Add FAL_API_KEY to .env for Kling 2.6."
-                    });
-                }
-
-                if (isMotionControl) {
-                    // Motion Control mode
-                    console.log(`\n[Route] Kling 2.6 Motion Control detected - routing to fal.ai`);
-                    console.log(`[Route] Motion Reference: ${motionReferenceUrl ? 'YES (' + Math.round(motionReferenceUrl.length / 1024) + ' KB)' : 'NO'}`);
-                    console.log(`[Route] Character Image: ${imageBase64 ? 'YES (' + Math.round(imageBase64.length / 1024) + ' KB)' : 'NO'}`);
-                    console.log(`[Route] Prompt: ${prompt ? prompt.substring(0, 50) + '...' : '(none)'}`);
-
-                    const { generateFalMotionControl } = await import('../services/fal.js');
-
-                    resultVideoUrl = await generateFalMotionControl({
-                        prompt,
-                        characterImageBase64: imageBase64,
-                        motionVideoBase64: motionReferenceUrl,
-                        characterOrientation: 'video',
-                        apiKey: FAL_API_KEY
-                    });
-                } else {
-                    // Standard Image-to-Video mode
-                    console.log(`\n[Route] Kling 2.6 Image-to-Video - routing to fal.ai`);
+                if (KIE_API_KEY && !isMotionControl) {
+                    // --- KLING 2.6 VIA KIE ---
+                    console.log(`\n[Route] Kling 2.6 detected - routing to Kie`);
                     console.log(`[Route] Image: ${imageBase64 ? 'YES (' + Math.round(imageBase64.length / 1024) + ' KB)' : 'NO'}`);
                     console.log(`[Route] Duration: ${duration || 5}s`);
-                    console.log(`[Route] Generate Audio: ${req.body.generateAudio !== false}`);
+                    console.log(`[Route] Generate Audio: ${req.body.generateAudio === true}`);
 
-                    const { generateFalImageToVideo } = await import('../services/fal.js');
-
-                    resultVideoUrl = await generateFalImageToVideo({
+                    resultVideoUrl = await generateKieKlingVideo({
                         prompt,
                         imageBase64,
-                        duration: String(duration || 5),
-                        generateAudio: req.body.generateAudio !== false, // Default to true
-                        apiKey: FAL_API_KEY
+                        aspectRatio,
+                        duration: duration || 5,
+                        generateAudio: req.body.generateAudio === true,
+                        apiKey: KIE_API_KEY
                     });
+                } else {
+                    // --- KLING 2.6 VIA FAL.AI FALLBACK ---
+                    // Motion-control remains on fal.ai; standard mode falls back when KIE_API_KEY is absent.
+                    const { FAL_API_KEY } = req.app.locals;
+
+                    if (!FAL_API_KEY) {
+                        return res.status(500).json({
+                            error: "KIE_API_KEY or FAL_API_KEY not configured. Add KIE_API_KEY to .env for Kling 2.6."
+                        });
+                    }
+
+                    if (isMotionControl) {
+                        // Motion Control mode
+                        console.log(`\n[Route] Kling 2.6 Motion Control detected - routing to fal.ai`);
+                        console.log(`[Route] Motion Reference: ${motionReferenceUrl ? 'YES (' + Math.round(motionReferenceUrl.length / 1024) + ' KB)' : 'NO'}`);
+                        console.log(`[Route] Character Image: ${imageBase64 ? 'YES (' + Math.round(imageBase64.length / 1024) + ' KB)' : 'NO'}`);
+                        console.log(`[Route] Prompt: ${prompt ? prompt.substring(0, 50) + '...' : '(none)'}`);
+
+                        const { generateFalMotionControl } = await import('../services/fal.js');
+
+                        resultVideoUrl = await generateFalMotionControl({
+                            prompt,
+                            characterImageBase64: imageBase64,
+                            motionVideoBase64: motionReferenceUrl,
+                            characterOrientation: 'video',
+                            apiKey: FAL_API_KEY
+                        });
+                    } else {
+                        // Standard Image-to-Video mode
+                        console.log(`\n[Route] Kling 2.6 Image-to-Video - routing to fal.ai`);
+                        console.log(`[Route] Image: ${imageBase64 ? 'YES (' + Math.round(imageBase64.length / 1024) + ' KB)' : 'NO'}`);
+                        console.log(`[Route] Duration: ${duration || 5}s`);
+                        console.log(`[Route] Generate Audio: ${req.body.generateAudio !== false}`);
+
+                        const { generateFalImageToVideo } = await import('../services/fal.js');
+
+                        resultVideoUrl = await generateFalImageToVideo({
+                            prompt,
+                            imageBase64,
+                            duration: String(duration || 5),
+                            generateAudio: req.body.generateAudio !== false, // Default to true
+                            apiKey: FAL_API_KEY
+                        });
+                    }
                 }
             } else {
                 // --- STANDARD KLING VIDEO GENERATION ---
@@ -262,13 +352,13 @@ router.post('/generate-video', async (req, res) => {
                     });
                 }
 
-                console.log(`Using Kling AI model: ${videoModel}, duration: ${duration || 5}s`);
+                console.log(`Using Kling AI model: ${selectedVideoModel}, duration: ${duration || 5}s`);
 
                 resultVideoUrl = await generateKlingVideo({
                     prompt,
                     imageBase64,
                     lastFrameBase64,
-                    modelId: videoModel,
+                    modelId: selectedVideoModel,
                     aspectRatio,
                     duration: duration || 5,
                     motionReferenceUrl,
@@ -292,13 +382,13 @@ router.post('/generate-video', async (req, res) => {
                 });
             }
 
-            console.log(`Using Hailuo AI model: ${videoModel}, duration: ${duration || 6}s`);
+            console.log(`Using Hailuo AI model: ${selectedVideoModel}, duration: ${duration || 6}s`);
 
             const hailuoVideoUrl = await generateHailuoVideo({
                 prompt,
                 imageBase64,
                 lastFrameBase64,
-                modelId: videoModel,
+                modelId: selectedVideoModel,
                 aspectRatio,
                 resolution,
                 duration: duration || 6,
@@ -318,7 +408,7 @@ router.post('/generate-video', async (req, res) => {
                 return res.status(500).json({ error: "Server missing API Key config" });
             }
 
-            console.log(`Using Veo model: ${videoModel || 'veo-3.1'}, duration: ${duration || 8}s, generateAudio: ${req.body.generateAudio !== false}`);
+            console.log(`Using Veo model: ${selectedVideoModel}, duration: ${duration || 8}s, generateAudio: ${req.body.generateAudio !== false}`);
 
             videoBuffer = await generateVeoVideo({
                 prompt,
@@ -343,7 +433,7 @@ router.post('/generate-video', async (req, res) => {
             id: metadataId,  // Must match the filename for delete API to find it
             filename: saved.filename,
             prompt: prompt,
-            model: videoModel || 'veo-3.1',
+            model: selectedVideoModel,
             aspectRatio: aspectRatio || 'Auto',
             resolution: resolution || 'Auto',
             createdAt: new Date().toISOString(),
@@ -351,7 +441,7 @@ router.post('/generate-video', async (req, res) => {
         };
         fs.writeFileSync(path.join(VIDEOS_DIR, `${metadataId}.json`), JSON.stringify(metadata, null, 2));
 
-        console.log(`Video saved: ${saved.url} (model: ${videoModel || 'veo-3.1'})`);
+        console.log(`Video saved: ${saved.url} (model: ${selectedVideoModel})`);
         return res.json({ resultUrl: saved.url });
 
     } catch (error) {
