@@ -6,6 +6,7 @@
  */
 
 import { NodeData, NodeType, NodeStatus } from '../types';
+import { createId } from '../utils/id';
 
 // ============================================================================
 // TYPES
@@ -48,7 +49,7 @@ export const useLocalModelNodeHandlers = ({
         modelId?: string,
         parentNodeId?: string
     ) => {
-        const newNodeId = crypto.randomUUID();
+        const newNodeId = createId();
 
         const newNode: NodeData = {
             id: newNodeId,
@@ -83,7 +84,7 @@ export const useLocalModelNodeHandlers = ({
         modelId?: string,
         parentNodeId?: string
     ) => {
-        const newNodeId = crypto.randomUUID();
+        const newNodeId = createId();
 
         const newNode: NodeData = {
             id: newNodeId,

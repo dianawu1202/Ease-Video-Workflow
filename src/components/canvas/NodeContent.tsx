@@ -12,6 +12,7 @@ import { NodeData, NodeStatus, NodeType } from '../../types';
 interface NodeContentProps {
     data: NodeData;
     inputUrl?: string;
+    connectedImageNodes?: { id: string; url: string; type?: NodeType }[];
     selected: boolean;
     isIdle: boolean;
     isLoading: boolean;
@@ -25,9 +26,6 @@ interface NodeContentProps {
     onWriteContent?: (nodeId: string) => void;
     onTextToVideo?: (nodeId: string) => void;
     onTextToImage?: (nodeId: string) => void;
-    // Image node callbacks
-    onImageToImage?: (nodeId: string) => void;
-    onImageToVideo?: (nodeId: string) => void;
     onGenerate?: (nodeId: string) => void;
     onCancelGeneration?: (nodeId: string) => void;
     onUpdate?: (nodeId: string, updates: Partial<NodeData>) => void;
@@ -38,6 +36,7 @@ interface NodeContentProps {
 export const NodeContent: React.FC<NodeContentProps> = ({
     data,
     inputUrl,
+    connectedImageNodes = [],
     selected,
     isIdle,
     isLoading,
@@ -50,8 +49,6 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     onWriteContent,
     onTextToVideo,
     onTextToImage,
-    onImageToImage,
-    onImageToVideo,
     onGenerate,
     onCancelGeneration,
     onUpdate,
@@ -72,6 +69,13 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     const isLocalModel = data.type === NodeType.LOCAL_IMAGE_MODEL || data.type === NodeType.LOCAL_VIDEO_MODEL;
     const isError = data.status === NodeStatus.ERROR;
     const hasResult = Boolean(data.resultUrl);
+    const visualReferenceInputs = connectedImageNodes.filter(node => Boolean(node.url));
+    const previewInputs = visualReferenceInputs.length > 0
+        ? visualReferenceInputs
+        : inputUrl
+            ? [{ id: 'input', url: inputUrl, type: NodeType.IMAGE }]
+            : [];
+    const hasImageReferenceInput = isImageType && previewInputs.length > 0;
 
     // Sync local state ONLY when data.prompt changes externally (not from our own update)
     useEffect(() => {
@@ -258,15 +262,35 @@ export const NodeContent: React.FC<NodeContentProps> = ({
             ${isLoading ? 'animate-pulse' : ''} 
             ${!selected ? 'rounded-2xl' : 'rounded-xl border border-dashed border-neutral-800'}`
                 }>
-                    {/* Input Image Preview for Video Nodes */}
-                    {isVideoType && inputUrl && (
+                    {/* Input Image Preview for Image/Video Nodes */}
+                    {((isVideoType && inputUrl) || hasImageReferenceInput) && (
                         <div className="absolute inset-0 z-0">
-                            <img src={inputUrl} alt="Input Frame" className="w-full h-full object-cover opacity-30 blur-sm" />
+                            <img
+                                src={hasImageReferenceInput ? previewInputs[0].url : inputUrl}
+                                alt={hasImageReferenceInput ? 'Reference Image' : 'Input Frame'}
+                                className="w-full h-full object-cover opacity-30 blur-sm"
+                            />
                             <div className="absolute inset-0 bg-black/40" />
                             <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 rounded text-[10px] text-white font-medium flex items-center gap-1">
                                 <ImageIcon size={10} />
-                                Input Frame
+                                {hasImageReferenceInput
+                                    ? `${previewInputs.length} Reference Image${previewInputs.length > 1 ? 's' : ''}`
+                                    : 'Input Frame'}
                             </div>
+                            {hasImageReferenceInput && (
+                                <div className="absolute bottom-2 left-2 right-2 flex gap-1.5 overflow-hidden">
+                                    {previewInputs.slice(0, 5).map((input, index) => (
+                                        <div key={`${input.id}-${index}`} className="h-11 w-11 shrink-0 overflow-hidden rounded-md border border-white/20 bg-black/40">
+                                            <img src={input.url} alt="Reference" className="h-full w-full object-cover" />
+                                        </div>
+                                    ))}
+                                    {previewInputs.length > 5 && (
+                                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-white/20 bg-black/60 text-[11px] font-semibold text-white">
+                                            +{previewInputs.length - 5}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -344,27 +368,15 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                                     <div className="text-neutral-500 text-sm font-medium">
                                         {isVideoType && inputUrl
                                             ? "Ready to animate"
+                                            : hasImageReferenceInput
+                                                ? "Ready to generate from reference"
                                             : isVideoType
                                                 ? "Waiting for input..."
                                                 : isLocalModel
                                                     ? "Select a model and enter prompt"
-                                                    : "Try to:"
+                                                    : "Ready to generate"
                                         }
                                     </div>
-                                    {!isVideoType && !isLocalModel && (
-                                        <div className="flex flex-col gap-1 w-full px-2">
-                                            <TextNodeMenuItem
-                                                icon={<ImageIcon size={16} />}
-                                                label="Image to Image"
-                                                onClick={() => onImageToImage?.(data.id)}
-                                            />
-                                            <TextNodeMenuItem
-                                                icon={<Film size={16} />}
-                                                label="Image to Video"
-                                                onClick={() => onImageToVideo?.(data.id)}
-                                            />
-                                        </div>
-                                    )}
                                 </>
                             )}
                         </div>

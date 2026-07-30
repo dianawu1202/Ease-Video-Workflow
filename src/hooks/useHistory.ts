@@ -15,6 +15,7 @@ export const useHistory = <T>(initialState: T, maxHistorySize: number = 50) => {
     const [past, setPast] = useState<T[]>([]);
     const [present, setPresent] = useState<T>(initialState);
     const [future, setFuture] = useState<T[]>([]);
+    const [navigationRevision, setNavigationRevision] = useState(0);
 
     // ============================================================================
     // COMPUTED VALUES
@@ -40,6 +41,7 @@ export const useHistory = <T>(initialState: T, maxHistorySize: number = 50) => {
         setPast(newPast);
         setPresent(previous);
         setFuture([present, ...future]);
+        setNavigationRevision(prev => prev + 1);
     }, [canUndo, past, present, future]);
 
     /**
@@ -55,6 +57,7 @@ export const useHistory = <T>(initialState: T, maxHistorySize: number = 50) => {
         setPast([...past, present]);
         setPresent(next);
         setFuture(newFuture);
+        setNavigationRevision(prev => prev + 1);
     }, [canRedo, past, present, future]);
 
     /**
@@ -97,6 +100,7 @@ export const useHistory = <T>(initialState: T, maxHistorySize: number = 50) => {
         redo,
         pushHistory,
         reset,
+        navigationRevision,
         canUndo,
         canRedo
     };

@@ -8,6 +8,16 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Clock, Expand, ImagePlus, Languages, Loader2, Monitor, Send, Sparkles, Video as VideoIcon, Zap } from 'lucide-react';
 import { NodeData, NodeType } from '../../types';
 import { GoogleIcon, HailuoIcon, KlingIcon } from '../icons/BrandIcons';
+import { CreativeStyleSelect } from '../common/CreativeStyleSelect';
+import { CharacterLibrarySelect } from '../common/CharacterLibrarySelect';
+import { removeCreativeStyleFromPrompt } from '../../constants/creativeStyles';
+import {
+  CAMERA_MOVE_PRESETS,
+  NO_CAMERA_MOVE_PRESET_ID,
+  type CameraMovePreset,
+  getCameraMovePreset,
+  removeCameraMoveFromPrompt
+} from '../../constants/cameraMoves';
 
 interface VideoGenerationPanelProps {
   data: NodeData;
@@ -49,115 +59,9 @@ const VIDEO_MODELS: VideoModel[] = [
 ];
 
 const MODE_LABELS = {
-  text: '文生视频',
-  image: '图生视频'
+  text: '\u6587\u751f\u89c6\u9891',
+  image: '\u56fe\u751f\u89c6\u9891'
 };
-
-type CameraMovePreset = {
-  id: string;
-  name: string;
-  intent: string;
-  prompt: string;
-};
-
-const CAMERA_MOVE_PRESETS: CameraMovePreset[] = [
-  {
-    id: 'locked-off',
-    name: '固定镜头',
-    intent: '稳定、克制，突出表演与场面调度',
-    prompt: 'Camera movement: locked-off tripod shot, perfectly stable framing, no camera shake, cinematic composition, let the subject movement carry the scene.'
-  },
-  {
-    id: 'tracking-follow',
-    name: '跟随拍摄',
-    intent: '跟随角色行动，增强临场感',
-    prompt: 'Camera movement: smooth tracking follow shot, the camera follows behind and slightly beside the subject at walking speed, natural parallax, immersive cinematic motion.'
-  },
-  {
-    id: 'slow-push-in',
-    name: '缓慢推进',
-    intent: '压近人物情绪，制造专注和张力',
-    prompt: 'Camera movement: slow dolly push-in toward the subject, gradually tightening the frame, subtle cinematic tension, shallow depth of field, emotionally focused.'
-  },
-  {
-    id: 'slow-pull-back',
-    name: '缓慢拉远',
-    intent: '揭示环境，表现孤独、宏大或转折',
-    prompt: 'Camera movement: slow dolly pull-back, gradually revealing the surrounding environment around the subject, cinematic scale, controlled and elegant movement.'
-  },
-  {
-    id: 'orbit-left',
-    name: '左环绕',
-    intent: '展示人物体积与空间关系',
-    prompt: 'Camera movement: smooth leftward orbit around the subject, 30 to 60 degree arc, stable gimbal motion, strong parallax between foreground and background.'
-  },
-  {
-    id: 'orbit-right',
-    name: '右环绕',
-    intent: '制造动势，适合人物展示和产品感镜头',
-    prompt: 'Camera movement: smooth rightward orbit around the subject, cinematic gimbal arc, keep the subject centered while the background shifts with rich parallax.'
-  },
-  {
-    id: 'crane-up',
-    name: '升镜头',
-    intent: '从人物升到场景，制造开阔和史诗感',
-    prompt: 'Camera movement: crane up shot, camera rises vertically while keeping the subject in frame, slowly revealing the scale of the location, epic cinematic reveal.'
-  },
-  {
-    id: 'crane-down',
-    name: '降镜头',
-    intent: '从环境落到角色，建立地点后聚焦人物',
-    prompt: 'Camera movement: crane down shot, camera descends from a high establishing angle toward the subject, elegant cinematic reveal, controlled vertical motion.'
-  },
-  {
-    id: 'tilt-up',
-    name: '镜头上摇',
-    intent: '从低处扫到高处，强调高度、敬畏或登场',
-    prompt: 'Camera movement: slow tilt up, starting from the lower body or foreground and tilting upward to reveal the subject and towering environment, dramatic cinematic emphasis.'
-  },
-  {
-    id: 'tilt-down',
-    name: '镜头下摇',
-    intent: '从天空或建筑落到主体，建立空间压迫感',
-    prompt: 'Camera movement: slow tilt down, starting high above the scene and tilting downward to reveal the subject, atmospheric cinematic composition.'
-  },
-  {
-    id: 'pan-left',
-    name: '镜头左摇',
-    intent: '横向揭示信息，适合空间扫描',
-    prompt: 'Camera movement: slow pan left, scanning across the scene with controlled cinematic pacing, revealing new visual information while maintaining stable composition.'
-  },
-  {
-    id: 'pan-right',
-    name: '镜头右摇',
-    intent: '横向跟随或揭示，适合街景与群像',
-    prompt: 'Camera movement: slow pan right, smooth lateral camera rotation, reveal the environment step by step, cinematic pacing and stable horizon.'
-  },
-  {
-    id: 'handheld',
-    name: '手持纪实',
-    intent: '紧张、真实、新闻感或追逐感',
-    prompt: 'Camera movement: subtle handheld camera motion, realistic micro-shake, documentary immediacy, keep the subject readable, cinematic but grounded.'
-  },
-  {
-    id: 'whip-pan',
-    name: '快速甩镜',
-    intent: '动作转场、突然发现或节奏加速',
-    prompt: 'Camera movement: fast whip pan transition, rapid horizontal camera sweep with motion blur, energetic cinematic timing, landing cleanly on the next subject.'
-  },
-  {
-    id: 'dutch-roll',
-    name: '倾斜旋转',
-    intent: '不安、眩晕、梦境或心理失衡',
-    prompt: 'Camera movement: subtle dutch angle roll, slight rotating camera tilt, unsettling cinematic mood, controlled motion without losing subject clarity.'
-  },
-  {
-    id: 'fpv-flythrough',
-    name: '穿越飞行',
-    intent: '空间穿梭、速度感、沉浸式探索',
-    prompt: 'Camera movement: FPV fly-through shot, camera glides forward through the environment with dynamic depth, passing foreground elements, immersive cinematic speed.'
-  }
-];
 
 const getModelIcon = (model: VideoModel) => {
   if (model.provider === 'bytedance') return <VideoIcon size={14} className="text-pink-300" />;
@@ -215,6 +119,7 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
   const currentResolution = data.resolution || currentModel.resolutions[0] || 'Auto';
   const currentAspectRatio = data.aspectRatio || currentModel.aspectRatios[0] || '16:9';
   const currentDuration = data.videoDuration || currentModel.durations[0] || 5;
+  const currentCameraMovePreset = getCameraMovePreset(data.cameraMovePreset);
 
   useEffect(() => {
     if (data.prompt !== lastSentPromptRef.current) {
@@ -259,6 +164,16 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
     }, 150);
   };
 
+  const handleStylePresetChange = (stylePreset: string) => {
+    const nextPrompt = removeCreativeStyleFromPrompt(localPrompt);
+
+    if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
+
+    setLocalPrompt(nextPrompt);
+    lastSentPromptRef.current = nextPrompt;
+    onUpdate(data.id, { stylePreset, prompt: nextPrompt });
+  };
+
   const flushPrompt = () => {
     if (updateTimeoutRef.current) clearTimeout(updateTimeoutRef.current);
     if (localPrompt !== data.prompt) {
@@ -289,13 +204,20 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
   };
 
   const applyCameraMovePreset = (preset: CameraMovePreset) => {
-    const cameraPrompt = `\n\n[运镜: ${preset.name}]\n${preset.prompt}`;
-    const strippedPrompt = localPrompt.replace(/\n\n\[运镜: .*?\]\n.*$/s, '').trimEnd();
-    const nextPrompt = `${strippedPrompt}${cameraPrompt}`;
+    const nextPrompt = removeCameraMoveFromPrompt(localPrompt);
 
     setLocalPrompt(nextPrompt);
     lastSentPromptRef.current = nextPrompt;
-    onUpdate(data.id, { prompt: nextPrompt });
+    onUpdate(data.id, { cameraMovePreset: preset.id, prompt: nextPrompt });
+    setShowCameraMoveDropdown(false);
+  };
+
+  const clearCameraMovePreset = () => {
+    const nextPrompt = removeCameraMoveFromPrompt(localPrompt);
+
+    setLocalPrompt(nextPrompt);
+    lastSentPromptRef.current = nextPrompt;
+    onUpdate(data.id, { cameraMovePreset: NO_CAMERA_MOVE_PRESET_ID, prompt: nextPrompt });
     setShowCameraMoveDropdown(false);
   };
 
@@ -339,7 +261,7 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
         </div>
         <button
           className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${isDark ? 'text-neutral-500 hover:bg-neutral-700 hover:text-white' : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900'}`}
-          title="展开面板"
+          title={'\u5c55\u5f00\u9762\u677f'}
           onClick={() => onUpdate(data.id, { isPromptExpanded: !data.isPromptExpanded })}
         >
           <Expand size={16} />
@@ -348,7 +270,7 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
 
       <textarea
         className={`mb-3 w-full resize-none bg-transparent text-sm leading-6 outline-none ${isDark ? 'text-neutral-100 placeholder-neutral-500' : 'text-neutral-900 placeholder-neutral-400'}`}
-        placeholder={activeMode === 'image' ? '描述你想生成的画面内容，可引用画布素材' : '描述你想生成的视频内容，可引用画布素材'}
+        placeholder={activeMode === 'image' ? '\u63cf\u8ff0\u4f60\u60f3\u751f\u6210\u7684\u753b\u9762\u5185\u5bb9\uff0c\u53ef\u5f15\u7528\u753b\u5e03\u7d20\u6750' : '\u63cf\u8ff0\u4f60\u60f3\u751f\u6210\u7684\u89c6\u9891\u5185\u5bb9\uff0c\u53ef\u5f15\u7528\u753b\u5e03\u7d20\u6750'}
         rows={data.isPromptExpanded ? 9 : 4}
         value={localPrompt}
         onChange={(e) => handlePromptChange(e.target.value)}
@@ -367,10 +289,10 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
             ? 'border-blue-400 bg-blue-500/15 text-blue-300'
             : isDark ? 'border-neutral-700 bg-[#1d1d1d] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200' : 'border-neutral-300 bg-neutral-50 text-neutral-500 hover:border-neutral-400 hover:text-neutral-900'
             }`}
-          title="从画布选择参考资源"
+          title={'\u4ece\u753b\u5e03\u9009\u62e9\u53c2\u8003\u8d44\u6e90'}
         >
           <ImagePlus size={18} />
-          <span className="mt-1">参考</span>
+          <span className="mt-1">{'\u53c2\u8003'}</span>
         </button>
 
         {connectedVisualInputs.length > 0 ? (
@@ -379,22 +301,22 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
               <div
                 key={`${node.id}-${index}`}
                 className={`relative h-14 w-20 shrink-0 overflow-hidden rounded-xl border ${isDark ? 'border-neutral-700 bg-neutral-900' : 'border-neutral-200 bg-neutral-100'}`}
-                title={node.type === NodeType.VIDEO ? '视频参考' : '图片参考'}
+                title={node.type === NodeType.VIDEO ? '\u89c6\u9891\u53c2\u8003' : '\u56fe\u7247\u53c2\u8003'}
               >
                 {node.type === NodeType.VIDEO ? (
                   <video src={node.url} className="h-full w-full object-cover" muted />
                 ) : (
-                  <img src={node.url} alt="参考素材" className="h-full w-full object-cover" />
+                  <img src={node.url} alt="Reference asset" className="h-full w-full object-cover" />
                 )}
                 <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                  {node.type === NodeType.VIDEO ? '视频' : '图片'}
+                  {node.type === NodeType.VIDEO ? '\u89c6\u9891' : '\u56fe\u7247'}
                 </span>
               </div>
             ))}
           </div>
         ) : (
           <div className={`text-xs ${mutedTextClass}`}>
-            点击“参考”，再在画布上选择图片或视频资源
+            {'\u70b9\u51fb\u201c\u53c2\u8003\u201d\uff0c\u518d\u5728\u753b\u5e03\u4e0a\u9009\u62e9\u56fe\u7247\u6216\u89c6\u9891\u8d44\u6e90'}
           </div>
         )}
       </div>
@@ -439,7 +361,27 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <CreativeStyleSelect
+            value={data.stylePreset}
+            onChange={handleStylePresetChange}
+            isDark={isDark}
+            placement="top"
+            align="right"
+            buttonClassName={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${buttonClass}`}
+            maxLabelWidthClass="max-w-[58px]"
+          />
+
+          <CharacterLibrarySelect
+            value={data.characterPreset}
+            onChange={(characterPreset) => onUpdate(data.id, { characterPreset })}
+            isDark={isDark}
+            placement="top"
+            align="right"
+            buttonClassName={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${buttonClass}`}
+            maxLabelWidthClass="max-w-[58px]"
+          />
+
           <div className="relative" ref={resolutionDropdownRef}>
             <button
               onClick={() => setShowResolutionDropdown(!showResolutionDropdown)}
@@ -452,7 +394,7 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
               <OptionMenu
                 options={currentModel.resolutions}
                 current={currentResolution}
-                label="清晰度"
+                label={'\u6e05\u6670\u5ea6'}
                 onSelect={(value) => {
                   onUpdate(data.id, { resolution: value });
                   setShowResolutionDropdown(false);
@@ -474,7 +416,7 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
               <OptionMenu
                 options={currentModel.aspectRatios}
                 current={currentAspectRatio}
-                label="比例"
+                label={'\u6bd4\u4f8b'}
                 onSelect={(value) => {
                   onUpdate(data.id, { aspectRatio: value });
                   setShowAspectDropdown(false);
@@ -496,7 +438,7 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
               <OptionMenu
                 options={currentModel.durations.map(String)}
                 current={String(currentDuration)}
-                label="时长"
+                label={'\u65f6\u957f'}
                 onSelect={(value) => {
                   onUpdate(data.id, { videoDuration: Number(value) });
                   setShowDurationDropdown(false);
@@ -511,10 +453,10 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
             <button
               onClick={() => setShowCameraMoveDropdown(!showCameraMoveDropdown)}
               className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${buttonClass}`}
-              title="运镜"
+              title={currentCameraMovePreset ? `${currentCameraMovePreset.name}\n${currentCameraMovePreset.prompt}` : '\u8fd0\u955c'}
             >
               <VideoIcon size={13} className="text-violet-300" />
-              运镜
+              <span className="max-w-[68px] truncate">{currentCameraMovePreset ? currentCameraMovePreset.name : '\u8fd0\u955c'}</span>
               <ChevronDown size={12} className="opacity-60" />
             </button>
 
@@ -522,14 +464,14 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
               <div className={`absolute bottom-full right-0 z-50 mb-2 w-[420px] overflow-hidden rounded-2xl border shadow-2xl ${dropdownClass}`}>
                 <div className={`flex items-center justify-between border-b px-4 py-3 ${isDark ? 'border-neutral-700 bg-[#1f1f1f]' : 'border-neutral-200 bg-neutral-100'}`}>
                   <div>
-                    <div className="text-sm font-semibold">运镜广场</div>
-                    <div className={`mt-0.5 text-xs ${mutedTextClass}`}>选择常见电影镜头运动，自动追加导演提示词</div>
+                    <div className="text-sm font-semibold">{'\u8fd0\u955c\u5e7f\u573a'}</div>
+                    <div className={`mt-0.5 text-xs ${mutedTextClass}`}>{'\u9009\u62e9\u5e38\u89c1\u7535\u5f71\u955c\u5934\u8fd0\u52a8\uff0c\u751f\u6210\u65f6\u81ea\u52a8\u5e26\u4e0a\u5bfc\u6f14\u63d0\u793a\u8bcd'}</div>
                   </div>
                   <button
-                    onClick={() => setShowCameraMoveDropdown(false)}
-                    className={`rounded-lg px-2 py-1 text-xs transition-colors ${isDark ? 'text-neutral-400 hover:bg-neutral-700 hover:text-white' : 'text-neutral-500 hover:bg-neutral-200 hover:text-neutral-900'}`}
+                    onClick={clearCameraMovePreset}
+                    className={`rounded-lg px-2 py-1 text-xs transition-colors ${!currentCameraMovePreset ? 'text-blue-400' : isDark ? 'text-neutral-400 hover:bg-neutral-700 hover:text-white' : 'text-neutral-500 hover:bg-neutral-200 hover:text-neutral-900'}`}
                   >
-                    关闭
+                    {'\u4e0d\u9009'}
                   </button>
                 </div>
                 <div className="grid max-h-[420px] grid-cols-2 gap-2 overflow-y-auto p-3">
@@ -537,10 +479,17 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
                     <button
                       key={preset.id}
                       onClick={() => applyCameraMovePreset(preset)}
-                      className={`rounded-xl border p-3 text-left transition-colors ${isDark ? 'border-neutral-700 bg-[#2b2b2b] hover:border-neutral-500 hover:bg-[#333]' : 'border-neutral-200 bg-white hover:border-neutral-300 hover:bg-neutral-50'}`}
+                      title={preset.prompt}
+                      className={`group rounded-xl border p-3 text-left transition-colors ${isDark ? 'border-neutral-700 bg-[#2b2b2b] hover:border-neutral-500 hover:bg-[#333]' : 'border-neutral-200 bg-white hover:border-neutral-300 hover:bg-neutral-50'} ${currentCameraMovePreset?.id === preset.id ? 'ring-1 ring-blue-400/80' : ''}`}
                     >
-                      <div className="text-sm font-semibold">{preset.name}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold">{preset.name}</span>
+                        {currentCameraMovePreset?.id === preset.id && <Check size={13} className="shrink-0 text-blue-400" />}
+                      </div>
                       <div className={`mt-1 text-xs leading-5 ${mutedTextClass}`}>{preset.intent}</div>
+                      <div className={`mt-2 hidden rounded-lg border p-2 text-[10px] leading-4 group-hover:block ${isDark ? 'border-violet-400/20 bg-black/25 text-violet-100/80' : 'border-violet-200 bg-violet-50 text-violet-900'}`}>
+                        {preset.prompt}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -550,20 +499,19 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
 
           <button
             className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${isDark ? 'text-neutral-300 hover:bg-neutral-700' : 'text-neutral-600 hover:bg-neutral-100'}`}
-            title="翻译提示词"
+            title={'\u7ffb\u8bd1\u63d0\u793a\u8bcd'}
           >
             <Languages size={15} />
           </button>
 
           <button
             className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${isDark ? 'text-neutral-300 hover:bg-neutral-700' : 'text-neutral-600 hover:bg-neutral-100'}`}
-            title="生成数量"
+            title={'\u751f\u6210\u6570\u91cf'}
           >
-            1个
-            <ChevronDown size={12} />
+            1
           </button>
 
-          <div className={`flex items-center gap-1 text-xs ${mutedTextClass}`} title="预计点数">
+          <div className={`flex items-center gap-1 text-xs ${mutedTextClass}`} title={'\u9884\u8ba1\u70b9\u6570'}>
             <Zap size={13} />
             75
           </div>
@@ -575,7 +523,7 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({
               ? 'cursor-not-allowed bg-neutral-700 text-neutral-400'
               : isDark ? 'bg-white text-neutral-950 hover:bg-neutral-200 active:scale-95' : 'bg-neutral-950 text-white hover:bg-neutral-800 active:scale-95'
               }`}
-            title="生成"
+            title={'\u751f\u6210'}
           >
             {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
           </button>

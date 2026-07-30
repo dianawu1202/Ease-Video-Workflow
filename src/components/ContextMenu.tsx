@@ -3,9 +3,7 @@ import {
   Type,
   Image as ImageIcon,
   Video,
-  Film,
   Music,
-  PenTool,
   Layout,
   Upload,
   Trash2,
@@ -19,6 +17,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { ContextMenuState, NodeType } from '../types';
+import { CREATABLE_NODE_TYPES, getConnectorCreatableNodeTypes } from '../utils/nodeActionRules';
 
 interface ContextMenuProps {
   state: ContextMenuState;
@@ -35,6 +34,7 @@ interface ContextMenuProps {
   canUndo?: boolean;
   canRedo?: boolean;
   canvasTheme?: 'dark' | 'light';
+  sourceNodeType?: NodeType;
 }
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -51,7 +51,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onAddAssets,
   canUndo = false,
   canRedo = false,
-  canvasTheme = 'dark'
+  canvasTheme = 'dark',
+  sourceNodeType
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -113,6 +114,85 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       onPaste();
       onClose();
     }
+  };
+
+  const handleNodeTypeMouseDownCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const button = target?.closest<HTMLButtonElement>('button[data-node-type]');
+    const nodeType = button?.dataset.nodeType as NodeType | undefined;
+
+    if (!nodeType) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectType(nodeType);
+  };
+
+  const handleNodeTypeTouchStartCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const button = target?.closest<HTMLButtonElement>('button[data-node-type]');
+    const nodeType = button?.dataset.nodeType as NodeType | undefined;
+
+    if (!nodeType) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectType(nodeType);
+  };
+
+  const isConnector = state.type === 'node-connector';
+
+  const addNodeOptions = isConnector
+    ? getConnectorCreatableNodeTypes(sourceNodeType, state.connectorSide || 'right')
+    : CREATABLE_NODE_TYPES;
+
+  const renderAddNodeItem = (nodeType: NodeType) => {
+    if (nodeType === NodeType.TEXT) {
+      return (
+        <MenuItem
+          key={nodeType}
+          icon={<Type size={18} />}
+          label={isConnector ? "Text Generation" : "Text"}
+          nodeType={NodeType.TEXT}
+          activateOnPointerDown
+          desc={isConnector ? "Script, Ad copy, Brand text" : undefined}
+          onClick={() => onSelectType(NodeType.TEXT)}
+          canvasTheme={canvasTheme}
+        />
+      );
+    }
+
+    if (nodeType === NodeType.IMAGE) {
+      return (
+        <MenuItem
+          key={nodeType}
+          icon={<ImageIcon size={18} />}
+          label={isConnector ? "Image Generation" : "Image"}
+          nodeType={NodeType.IMAGE}
+          activateOnPointerDown
+          desc={isConnector ? undefined : "Promotional image, poster, cover"}
+          active={false}
+          onClick={() => onSelectType(NodeType.IMAGE)}
+          canvasTheme={canvasTheme}
+        />
+      );
+    }
+
+    if (nodeType === NodeType.VIDEO) {
+      return (
+        <MenuItem
+          key={nodeType}
+          icon={<Video size={18} />}
+          label={isConnector ? "Video Generation" : "Video"}
+          nodeType={NodeType.VIDEO}
+          activateOnPointerDown
+          onClick={() => onSelectType(NodeType.VIDEO)}
+          canvasTheme={canvasTheme}
+        />
+      );
+    }
+
+    return null;
   };
 
 
@@ -186,9 +266,6 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       </div>
     );
   }
-
-  // 2. Connector Drag Drop (Add Next)
-  const isConnector = state.type === 'node-connector';
 
   // If it's the Global Menu (Right Click on Blank), we show the specific options
   if (state.type === 'global' && view === 'main') {
@@ -273,6 +350,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
+      onMouseDownCapture={handleNodeTypeMouseDownCapture}
+      onTouchStartCapture={handleNodeTypeTouchStartCapture}
       style={{
         position: 'absolute',
         left: state.x,
@@ -288,45 +367,14 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       </div>
 
       <div className="p-2 flex flex-col gap-1 max-h-[400px] overflow-y-auto">
-        <MenuItem
-          icon={<Type size={18} />}
-          label={isConnector ? "Text Generation" : "Text"}
-          desc={isConnector ? "Script, Ad copy, Brand text" : undefined}
-          onClick={() => onSelectType(NodeType.TEXT)}
-          canvasTheme={canvasTheme}
-        />
-        <MenuItem
-          icon={<ImageIcon size={18} />}
-          label={isConnector ? "Image Generation" : "Image"}
-          desc={isConnector ? undefined : "Promotional image, poster, cover"}
-          active={false}
-          onClick={() => onSelectType(NodeType.IMAGE)}
-          canvasTheme={canvasTheme}
-        />
-        <MenuItem
-          icon={<Video size={18} />}
-          label={isConnector ? "Video Generation" : "Video"}
-          onClick={() => onSelectType(NodeType.VIDEO)}
-          canvasTheme={canvasTheme}
-        />
-
-        {!isConnector && (
-          <MenuItem
-            icon={<PenTool size={18} />}
-            label="Image Editor"
-            onClick={() => onSelectType(NodeType.IMAGE_EDITOR)}
-            canvasTheme={canvasTheme}
-          />
+        {addNodeOptions.length > 0 ? (
+          addNodeOptions.map(renderAddNodeItem)
+        ) : (
+          <div className={`px-3 py-4 text-center text-xs ${canvasTheme === 'dark' ? 'text-neutral-500' : 'text-neutral-500'}`}>
+            No compatible next actions
+          </div>
         )}
 
-        {!isConnector && (
-          <MenuItem
-            icon={<Film size={18} />}
-            label="Video Editor"
-            onClick={() => onSelectType(NodeType.VIDEO_EDITOR)}
-            canvasTheme={canvasTheme}
-          />
-        )}
       </div>
     </div>
   );
@@ -342,13 +390,55 @@ interface MenuItemProps {
   rightSlot?: React.ReactNode;
   disabled?: boolean;
   canvasTheme?: 'dark' | 'light';
+  nodeType?: NodeType;
+  activateOnPointerDown?: boolean;
   onClick: () => void;
 }
 
-const MenuItem: React.FC<MenuItemProps> = ({ icon, label, desc, badge, shortcut, active, rightSlot, disabled, canvasTheme = 'dark', onClick }) => {
+const MenuItem: React.FC<MenuItemProps> = ({ icon, label, desc, badge, shortcut, active, rightSlot, disabled, canvasTheme = 'dark', nodeType, activateOnPointerDown = false, onClick }) => {
+  const activatedEarlyRef = useRef(false);
+
+  const activate = () => {
+    if (!disabled) onClick();
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (activatedEarlyRef.current) {
+      activatedEarlyRef.current = false;
+      return;
+    }
+    activate();
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (!activateOnPointerDown || disabled || e.button !== 0) return;
+    e.preventDefault();
+    activatedEarlyRef.current = true;
+    activate();
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (!activateOnPointerDown || disabled) return;
+    e.preventDefault();
+    activatedEarlyRef.current = true;
+    activate();
+  };
+
   return (
     <button
-      onClick={disabled ? undefined : onClick}
+      type="button"
+      data-node-type={nodeType}
+      onPointerDown={handlePointerDown}
+      onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
+      onClick={disabled ? undefined : handleClick}
       disabled={disabled}
       className={`group flex items-center gap-3 w-full p-2 rounded-lg text-left transition-colors 
         ${disabled

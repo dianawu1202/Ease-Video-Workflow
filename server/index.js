@@ -32,6 +32,7 @@ const IMAGES_DIR = path.join(LIBRARY_DIR, 'images');
 const VIDEOS_DIR = path.join(LIBRARY_DIR, 'videos');
 const CHATS_DIR = path.join(LIBRARY_DIR, 'chats');
 const LIBRARY_ASSETS_DIR = path.join(LIBRARY_DIR, 'assets');
+const CURRENT_CANVAS_DRAFT_PATH = path.join(LIBRARY_DIR, 'current-canvas-draft.json');
 
 [LIBRARY_DIR, WORKFLOWS_DIR, IMAGES_DIR, VIDEOS_DIR, CHATS_DIR, LIBRARY_ASSETS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
@@ -428,6 +429,60 @@ app.delete('/api/library/:id', async (req, res) => {
 });
 
 // --- Workflow API Routes ---
+
+// Current canvas draft shared by every browser that opens this local server.
+app.get('/api/canvas-draft', async (req, res) => {
+    try {
+        if (!fs.existsSync(CURRENT_CANVAS_DRAFT_PATH)) {
+            return res.status(404).json({ error: 'Canvas draft not found' });
+        }
+
+        const content = fs.readFileSync(CURRENT_CANVAS_DRAFT_PATH, 'utf8');
+        res.json(JSON.parse(content));
+    } catch (error) {
+        console.error('Load canvas draft error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/canvas-draft', async (req, res) => {
+    try {
+        const draft = req.body || {};
+        if (!Array.isArray(draft.nodes)) {
+            return res.status(400).json({ error: 'Canvas draft requires a nodes array' });
+        }
+
+        if (draft.nodes.length === 0 && fs.existsSync(CURRENT_CANVAS_DRAFT_PATH) && draft.allowEmptyOverwrite !== true) {
+            try {
+                const existingDraft = JSON.parse(fs.readFileSync(CURRENT_CANVAS_DRAFT_PATH, 'utf8'));
+                if (Array.isArray(existingDraft.nodes) && existingDraft.nodes.length > 0) {
+                    return res.json({
+                        success: true,
+                        skipped: true,
+                        reason: 'Ignored empty draft so it does not overwrite an existing canvas.'
+                    });
+                }
+            } catch (readError) {
+                console.warn('Could not inspect existing canvas draft before save:', readError.message);
+            }
+        }
+
+        const sanitizedDraft = {
+            title: draft.title || 'Untitled Canvas',
+            nodes: sanitizeWorkflowNodes(draft.nodes),
+            groups: Array.isArray(draft.groups) ? draft.groups : [],
+            viewport: draft.viewport || { x: 0, y: 0, zoom: 1 },
+            workflowId: draft.workflowId || null,
+            updatedAt: new Date().toISOString()
+        };
+
+        fs.writeFileSync(CURRENT_CANVAS_DRAFT_PATH, JSON.stringify(sanitizedDraft, null, 2));
+        res.json({ success: true, updatedAt: sanitizedDraft.updatedAt });
+    } catch (error) {
+        console.error('Save canvas draft error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // Save/Update workflow
 app.post('/api/workflows', async (req, res) => {

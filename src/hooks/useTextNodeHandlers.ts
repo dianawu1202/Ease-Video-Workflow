@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
+import { createId } from '../utils/id';
 
 interface UseTextNodeHandlersOptions {
     nodes: NodeData[];
@@ -35,7 +36,7 @@ export const useTextNodeHandlers = ({
         if (!textNode) return;
 
         // Create Video node to the right
-        const videoNodeId = crypto.randomUUID();
+        const videoNodeId = createId();
         const GAP = 100;
         const NODE_WIDTH = 340;
 
@@ -72,7 +73,7 @@ export const useTextNodeHandlers = ({
         if (!textNode) return;
 
         // Create Image node to the right
-        const imageNodeId = crypto.randomUUID();
+        const imageNodeId = createId();
         const GAP = 100;
         const NODE_WIDTH = 340;
 

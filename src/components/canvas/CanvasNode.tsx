@@ -38,9 +38,6 @@ interface CanvasNodeProps {
   onWriteContent?: (nodeId: string) => void;
   onTextToVideo?: (nodeId: string) => void;
   onTextToImage?: (nodeId: string) => void;
-  // Image node callbacks
-  onImageToImage?: (nodeId: string) => void;
-  onImageToVideo?: (nodeId: string) => void;
   onMakeCharacterTurnaround?: (nodeId: string) => void;
   onCreateStoryboardFromImage?: (nodeId: string) => void;
   zoom: number;
@@ -79,8 +76,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   onWriteContent,
   onTextToVideo,
   onTextToImage,
-  onImageToImage,
-  onImageToVideo,
   onMakeCharacterTurnaround,
   onCreateStoryboardFromImage,
   zoom,
@@ -238,6 +233,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
     return (
       <div
         className={`absolute flex items-center group/node touch-none pointer-events-auto`}
+        data-node-id={data.id}
+        data-node-type={data.type}
         style={{
           transform: `translate(${data.x}px, ${data.y}px)`,
           transition: 'box-shadow 0.2s',
@@ -298,6 +295,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
     return (
       <div
         className={`absolute flex items-center group/node touch-none pointer-events-auto`}
+        data-node-id={data.id}
+        data-node-type={data.type}
         style={{
           transform: `translate(${data.x}px, ${data.y}px)`,
           transition: 'box-shadow 0.2s',
@@ -432,6 +431,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
     return (
       <div
         className={`absolute flex items-center group/node touch-none pointer-events-auto`}
+        data-node-id={data.id}
+        data-node-type={data.type}
         style={{
           transform: `translate(${data.x}px, ${data.y}px)`,
           transition: 'box-shadow 0.2s',
@@ -502,6 +503,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
   return (
     <div
       className={`absolute group/node touch-none pointer-events-auto`}
+      data-node-id={data.id}
+      data-node-type={data.type}
       style={{
         transform: `translate(${data.x}px, ${data.y}px)`,
         transition: 'box-shadow 0.2s',
@@ -828,6 +831,7 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
           <NodeContent
             data={data}
             inputUrl={inputUrl}
+            connectedImageNodes={connectedImageNodes}
             selected={selected}
             isIdle={isIdle}
             isLoading={isLoading}
@@ -840,8 +844,6 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
             onWriteContent={onWriteContent}
             onTextToVideo={onTextToVideo}
             onTextToImage={onTextToImage}
-            onImageToImage={onImageToImage}
-            onImageToVideo={onImageToVideo}
             onGenerate={onGenerate}
             onCancelGeneration={onCancelGeneration}
             onUpdate={onUpdate}
@@ -862,6 +864,8 @@ export const CanvasNode: React.FC<CanvasNodeProps> = ({
               onUpdate={onUpdate}
               onGenerate={onGenerate}
               onSelect={onSelect}
+              onStartReferencePick={onStartReferencePick}
+              isPickingReference={isPickingReference}
               zoom={zoom}
               canvasTheme={canvasTheme}
             />

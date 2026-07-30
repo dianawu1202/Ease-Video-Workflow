@@ -183,6 +183,8 @@ export const VideoCanvasNode: React.FC<VideoCanvasNodeProps> = ({
   return (
     <div
       className="absolute group/node touch-none pointer-events-auto"
+      data-node-id={data.id}
+      data-node-type={data.type}
       style={{
         transform: `translate(${data.x}px, ${data.y}px)`,
         transition: 'box-shadow 0.2s',

@@ -36,6 +36,7 @@ import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
 import { extractVideoLastFrame } from './utils/videoHelpers';
+import { createId } from './utils/id';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { WorkflowPanel } from './components/WorkflowPanel';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -52,6 +53,8 @@ import { useTikTokImport } from './hooks/useTikTokImport';
 import { useStoryboardGenerator } from './hooks/useStoryboardGenerator';
 import { StoryboardGeneratorModal } from './components/modals/StoryboardGeneratorModal';
 import { StoryboardVideoModal } from './components/modals/StoryboardVideoModal';
+import { composePromptWithCreativeStyle } from './constants/creativeStyles';
+import { composePromptWithCharacter } from './constants/characterLibrary';
 
 const LOCAL_CANVAS_DRAFT_KEY = 'twitcanva:last-canvas-draft';
 const LAST_WORKFLOW_ID_KEY = 'twitcanva:last-workflow-id';
@@ -219,6 +222,8 @@ export default function App() {
     undo,
     redo,
     pushHistory,
+    reset: resetHistory,
+    navigationRevision,
     canUndo,
     canRedo
   } = useHistory({ nodes, groups }, 50);
@@ -261,35 +266,112 @@ export default function App() {
   const hasRestoredCanvasDraftRef = React.useRef(false);
   const shouldPersistCanvasDraftRef = React.useRef(false);
 
+  const persistCanvasDraftToServer = React.useCallback(async (draft: LocalCanvasDraft) => {
+    if (!Array.isArray(draft.nodes) || draft.nodes.length === 0) return;
+
+    try {
+      await fetch('/api/canvas-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft)
+      });
+    } catch (error) {
+      console.warn('[Canvas Draft] Failed to persist server draft:', error);
+    }
+  }, []);
+
   React.useEffect(() => {
     if (hasRestoredCanvasDraftRef.current) return;
-    hasRestoredCanvasDraftRef.current = true;
 
     let cancelled = false;
 
     const restoreCanvas = async () => {
       try {
-        const rawDraft = localStorage.getItem(LOCAL_CANVAS_DRAFT_KEY);
-        if (rawDraft) {
-          const draft = JSON.parse(rawDraft) as Partial<LocalCanvasDraft>;
-          if (Array.isArray(draft.nodes)) {
-            if (cancelled) return;
-            ignoreNextChange.current = true;
-            setNodes(draft.nodes);
-            setGroups(Array.isArray(draft.groups) ? draft.groups : []);
-            setSelectedNodeIds([]);
+        const applyDraft = (draft: Partial<LocalCanvasDraft>) => {
+          const nextNodes = Array.isArray(draft.nodes) ? draft.nodes : [];
+          const nextGroups = Array.isArray(draft.groups) ? draft.groups : [];
 
-            if (draft.viewport && typeof draft.viewport.x === 'number') {
-              setViewport(draft.viewport);
-            }
+          ignoreNextChange.current = true;
+          setNodes(nextNodes);
+          setGroups(nextGroups);
+          setSelectedNodeIds([]);
+          resetHistory({ nodes: nextNodes, groups: nextGroups });
 
-            const restoredTitle = draft.title || 'Untitled Canvas';
-            setCanvasTitle(restoredTitle);
-            setEditingTitleValue(restoredTitle);
-            setIsDirty(false);
-            console.log('[Canvas Draft] Restored local canvas draft');
-            return;
+          if (draft.viewport && typeof draft.viewport.x === 'number') {
+            setViewport(draft.viewport);
           }
+
+          const restoredTitle = draft.title || 'Untitled Canvas';
+          setCanvasTitle(restoredTitle);
+          setEditingTitleValue(restoredTitle);
+          setIsDirty(false);
+        };
+
+        const isUsableDraft = (draft: Partial<LocalCanvasDraft> | null): draft is Partial<LocalCanvasDraft> & { nodes: NodeData[] } => {
+          return Boolean(draft && Array.isArray(draft.nodes) && draft.nodes.length > 0);
+        };
+
+        const readLocalDraft = (): (Partial<LocalCanvasDraft> & { nodes: NodeData[] }) | null => {
+          try {
+            const rawDraft = localStorage.getItem(LOCAL_CANVAS_DRAFT_KEY);
+            if (!rawDraft) return null;
+            const draft = JSON.parse(rawDraft) as Partial<LocalCanvasDraft>;
+            return isUsableDraft(draft) ? draft : null;
+          } catch (error) {
+            console.warn('[Canvas Draft] Failed to parse local draft:', error);
+            return null;
+          }
+        };
+
+        const readServerDraft = async (): Promise<(Partial<LocalCanvasDraft> & { nodes: NodeData[] }) | null> => {
+          try {
+            const serverDraftResponse = await fetch('/api/canvas-draft');
+            if (!serverDraftResponse.ok) return null;
+            const serverDraft = await serverDraftResponse.json() as Partial<LocalCanvasDraft>;
+            return isUsableDraft(serverDraft) ? serverDraft : null;
+          } catch (error) {
+            console.warn('[Canvas Draft] Failed to load shared server draft:', error);
+            return null;
+          }
+        };
+
+        const pickBestDraft = (
+          localDraft: (Partial<LocalCanvasDraft> & { nodes: NodeData[] }) | null,
+          serverDraft: (Partial<LocalCanvasDraft> & { nodes: NodeData[] }) | null
+        ) => {
+          if (!localDraft) return serverDraft;
+          if (!serverDraft) return localDraft;
+
+          if (serverDraft.nodes.length !== localDraft.nodes.length) {
+            return serverDraft.nodes.length > localDraft.nodes.length ? serverDraft : localDraft;
+          }
+
+          const localTime = Date.parse(localDraft.updatedAt || '') || 0;
+          const serverTime = Date.parse(serverDraft.updatedAt || '') || 0;
+          return serverTime >= localTime ? serverDraft : localDraft;
+        };
+
+        const rawDraft = localStorage.getItem(LOCAL_CANVAS_DRAFT_KEY);
+        const localDraft = rawDraft ? readLocalDraft() : null;
+        const serverDraft = await readServerDraft();
+        const bestDraft = pickBestDraft(localDraft, serverDraft);
+
+        if (bestDraft) {
+          if (cancelled) return;
+          applyDraft(bestDraft);
+          localStorage.setItem(LOCAL_CANVAS_DRAFT_KEY, JSON.stringify(bestDraft));
+          if (bestDraft === localDraft) {
+            void persistCanvasDraftToServer({
+              title: bestDraft.title || 'Untitled Canvas',
+              nodes: bestDraft.nodes,
+              groups: Array.isArray(bestDraft.groups) ? bestDraft.groups : [],
+              viewport: bestDraft.viewport || viewport,
+              workflowId: bestDraft.workflowId || null,
+              updatedAt: new Date().toISOString()
+            });
+          }
+          console.log(`[Canvas Draft] Restored ${bestDraft === serverDraft ? 'shared server' : 'local'} canvas draft (${bestDraft.nodes.length} nodes)`);
+          return;
         }
 
         const lastWorkflowId = localStorage.getItem(LAST_WORKFLOW_ID_KEY);
@@ -305,6 +387,7 @@ export default function App() {
         console.warn('[Canvas Draft] Failed to restore canvas:', error);
       } finally {
         if (cancelled) return;
+        hasRestoredCanvasDraftRef.current = true;
         window.setTimeout(() => {
           shouldPersistCanvasDraftRef.current = true;
         }, 0);
@@ -316,7 +399,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [handleLoadWorkflow, setNodes, setGroups, setSelectedNodeIds, setViewport, setCanvasTitle, setEditingTitleValue]);
+  }, [handleLoadWorkflow, setNodes, setGroups, setSelectedNodeIds, setViewport, setCanvasTitle, setEditingTitleValue, persistCanvasDraftToServer, resetHistory, viewport]);
 
   React.useEffect(() => {
     if (!hasRestoredCanvasDraftRef.current || !shouldPersistCanvasDraftRef.current) return;
@@ -332,14 +415,16 @@ export default function App() {
       };
 
       try {
+        if (draft.nodes.length === 0) return;
         localStorage.setItem(LOCAL_CANVAS_DRAFT_KEY, JSON.stringify(draft));
+        void persistCanvasDraftToServer(draft);
       } catch (error) {
         console.warn('[Canvas Draft] Failed to persist local draft:', error);
       }
     }, 300);
 
     return () => window.clearTimeout(timer);
-  }, [nodes, groups, viewport, canvasTitle, workflowId]);
+  }, [nodes, groups, viewport, canvasTitle, workflowId, persistCanvasDraftToServer]);
 
   React.useEffect(() => {
     if (isInitialMount.current) {
@@ -394,10 +479,25 @@ export default function App() {
     setNodes([]);
     setGroups([]); // Reset groups for new canvas
     setSelectedNodeIds([]);
+    resetHistory({ nodes: [], groups: [] });
     setCanvasTitle('Untitled Canvas');
     setEditingTitleValue('Untitled Canvas');
     resetWorkflowId(); // Important: ensures new workflow gets a new ID
     setIsDirty(false);
+    void fetch('/api/canvas-draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Untitled Canvas',
+        nodes: [],
+        groups: [],
+        viewport,
+        workflowId: null,
+        allowEmptyOverwrite: true
+      })
+    }).catch(error => {
+      console.warn('[Canvas Draft] Failed to clear shared server draft:', error);
+    });
   };
 
   // Image editor modal
@@ -445,8 +545,8 @@ export default function App() {
 
   // Image node handlers
   const {
-    handleImageToImage,
-    handleImageToVideo,
+    handleImagesToImage,
+    handleImagesToVideo,
     handleMakeCharacterTurnaround
   } = useImageNodeHandlers({ nodes, setNodes, setSelectedNodeIds, onGenerateNode: handleGenerateCreatedNode });
 
@@ -520,7 +620,7 @@ export default function App() {
   ) => {
     console.log('[Storyboard] handleCreateStoryboardNodes called with', newNodeData.length, 'nodes, groupInfo:', !!groupInfo);
     const newNodes: NodeData[] = newNodeData.map(data => ({
-      id: data.id || crypto.randomUUID(),
+      id: data.id || createId(),
       type: data.type || NodeType.IMAGE,
       x: data.x || 0,
       y: data.y || 0,
@@ -528,6 +628,8 @@ export default function App() {
       status: data.status || NodeStatus.IDLE,
       model: data.model || 'gpt-image-2',
       imageModel: data.imageModel,
+      stylePreset: data.stylePreset,
+      characterPreset: data.characterPreset,
       aspectRatio: data.aspectRatio || '16:9',
       resolution: data.resolution || '1K',
       title: data.title,
@@ -668,7 +770,7 @@ export default function App() {
 
     sourceNodes.forEach((sourceNode) => {
       // Create a new Video node for each image
-      const newNodeId = crypto.randomUUID();
+      const newNodeId = createId();
       const PROMPT = prompts[sourceNode.id] || sourceNode.prompt || 'Animated video';
 
       const newVideoNode: NodeData = {
@@ -933,17 +1035,22 @@ export default function App() {
   // Apply history state when undo/redo is triggered
   // IMPORTANT: Don't revert nodes if any node is in LOADING status (generation in progress)
   useEffect(() => {
+    if (navigationRevision === 0) {
+      return;
+    }
+
     // Skip if any node is currently generating - don't interrupt the loading state
     const hasLoadingNode = nodes.some(n => n.status === NodeStatus.LOADING);
     if (hasLoadingNode) {
       return;
     }
 
-    if (historyState.nodes !== nodes) {
+    if (historyState.nodes !== nodes || historyState.groups !== groups) {
       isApplyingHistory.current = true;
       setNodes(historyState.nodes);
+      setGroups(historyState.groups);
     }
-  }, [historyState]);
+  }, [navigationRevision]);
 
   // Simple wrapper for updateNode (sync code removed - TEXT node prompts are combined at generation time)
   const updateNodeWithSync = React.useCallback((id: string, updates: Partial<NodeData>) => {
@@ -954,9 +1061,9 @@ export default function App() {
   // EVENT HANDLERS
   // ============================================================================
 
-  const handleStartReferencePick = React.useCallback((videoNodeId: string) => {
-    setReferencePickTargetVideoId(videoNodeId);
-    setSelectedNodeIds([videoNodeId]);
+  const handleStartReferencePick = React.useCallback((targetNodeId: string) => {
+    setReferencePickTargetVideoId(targetNodeId);
+    setSelectedNodeIds([targetNodeId]);
     setContextMenu(prev => ({ ...prev, isOpen: false }));
     closeWorkflowPanel();
     closeHistoryPanel();
@@ -966,8 +1073,16 @@ export default function App() {
   const handlePickReferenceNode = React.useCallback((sourceNode: NodeData) => {
     if (!referencePickTargetVideoId) return false;
 
-    const isReferenceAsset = (sourceNode.type === NodeType.IMAGE || sourceNode.type === NodeType.VIDEO) && Boolean(sourceNode.resultUrl);
-    const canConnect = isReferenceAsset && sourceNode.id !== referencePickTargetVideoId;
+    const targetNode = nodes.find(n => n.id === referencePickTargetVideoId);
+    const targetIsImageNode = targetNode?.type === NodeType.IMAGE || targetNode?.type === NodeType.LOCAL_IMAGE_MODEL;
+    const targetIsVideoNode = targetNode?.type === NodeType.VIDEO || targetNode?.type === NodeType.LOCAL_VIDEO_MODEL;
+    const sourceHasResult = Boolean(sourceNode.resultUrl);
+    const isReferenceAsset = targetIsImageNode
+      ? sourceNode.type === NodeType.IMAGE && sourceHasResult
+      : targetIsVideoNode
+        ? (sourceNode.type === NodeType.IMAGE || sourceNode.type === NodeType.VIDEO) && sourceHasResult
+        : false;
+    const canConnect = Boolean(targetNode) && isReferenceAsset && sourceNode.id !== referencePickTargetVideoId;
 
     if (canConnect) {
       setNodes(prev => prev.map(node => {
@@ -975,11 +1090,26 @@ export default function App() {
 
         const existingParentIds = node.parentIds || [];
         if (existingParentIds.includes(sourceNode.id)) return node;
+        const nextParentIds = [...existingParentIds, sourceNode.id];
+
+        if (targetIsImageNode) {
+          return {
+            ...node,
+            parentIds: nextParentIds
+          };
+        }
+
+        const imageReferenceCount = nextParentIds.filter(parentId => {
+          const parent = parentId === sourceNode.id ? sourceNode : nodes.find(n => n.id === parentId);
+          return parent?.type === NodeType.IMAGE && Boolean(parent.resultUrl);
+        }).length;
+        const shouldUseMultiReference = node.videoMode !== 'frame-to-frame' && imageReferenceCount >= 2;
 
         return {
           ...node,
-          parentIds: [...existingParentIds, sourceNode.id],
-          videoMode: 'standard'
+          parentIds: nextParentIds,
+          videoMode: shouldUseMultiReference ? 'multi-reference' : (node.videoMode === 'motion-control' ? 'motion-control' : 'standard'),
+          frameInputs: shouldUseMultiReference ? undefined : node.frameInputs
         };
       }));
       setSelectedNodeIds([referencePickTargetVideoId]);
@@ -989,10 +1119,13 @@ export default function App() {
 
     setSelectedNodeIds([sourceNode.id]);
     return true;
-  }, [referencePickTargetVideoId, setNodes, setSelectedNodeIds]);
+  }, [referencePickTargetVideoId, setNodes, setSelectedNodeIds, nodes]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).id === 'canvas-background') {
+    const target = e.target as HTMLElement;
+    const isCanvasBlankTarget = target.id === 'canvas-background' || Boolean(target.closest('[data-canvas-background-hitbox="true"]'));
+
+    if (isCanvasBlankTarget) {
       if (referencePickTargetVideoId) {
         setReferencePickTargetVideoId(null);
       }
@@ -1234,6 +1367,7 @@ export default function App() {
         >
           {/* Background Grid */}
           <div
+            data-canvas-background-hitbox="true"
             className="absolute -top-[10000px] -left-[10000px] w-[20000px] h-[20000px]"
             style={{
               backgroundImage: canvasTheme === 'dark'
@@ -1285,7 +1419,11 @@ export default function App() {
                   if (!node.parentIds || node.parentIds.length === 0) return [];
                   return node.parentIds
                     .map(parentId => nodes.find(n => n.id === parentId))
-                    .filter(parent => parent && (parent.type === NodeType.IMAGE || parent.type === NodeType.VIDEO) && parent.resultUrl)
+                    .filter(parent => {
+                      if (!parent || parent.type === NodeType.TEXT || !parent.resultUrl) return false;
+                      if (parent.type === NodeType.VIDEO) return Boolean(parent.lastFrame || parent.resultUrl);
+                      return true;
+                    })
                     .map(parent => ({
                       id: parent!.id,
                       url: (parent!.type === NodeType.VIDEO ? parent!.lastFrame : parent!.resultUrl) || parent!.resultUrl!,
@@ -1335,8 +1473,6 @@ export default function App() {
                 onWriteContent={handleWriteContent}
                 onTextToVideo={handleTextToVideo}
                 onTextToImage={handleTextToImage}
-                onImageToImage={handleImageToImage}
-                onImageToVideo={handleImageToVideo}
                 onMakeCharacterTurnaround={handleMakeCharacterTurnaround}
                 onCreateStoryboardFromImage={handleCreateStoryboardFromImage}
                 zoom={viewport.zoom}
@@ -1374,6 +1510,36 @@ export default function App() {
                 const group = getCommonGroup(selectedNodeIds);
                 if (group) sortGroupNodes(group.id, direction, nodes, setNodes);
               }}
+              onCreateImage={(() => {
+                const selectedImageCount = nodes.filter(n =>
+                  selectedNodeIds.includes(n.id) &&
+                  n.type === NodeType.IMAGE &&
+                  Boolean(n.resultUrl)
+                ).length;
+
+                return selectedImageCount >= 2
+                  ? () => handleImagesToImage(selectedNodeIds)
+                  : undefined;
+              })()}
+              onCreateVideo={(() => {
+                const selectedImageCount = nodes.filter(n =>
+                  selectedNodeIds.includes(n.id) &&
+                  n.type === NodeType.IMAGE &&
+                  Boolean(n.resultUrl)
+                ).length;
+                const group = getCommonGroup(selectedNodeIds);
+
+                if (group?.storyContext) {
+                  return () => {
+                    const groupNodeIds = nodes.filter(n => n.groupId === group.id).map(n => n.id);
+                    handleCreateStoryboardVideo(groupNodeIds);
+                  };
+                }
+
+                return selectedImageCount >= 2
+                  ? () => handleImagesToVideo(selectedNodeIds)
+                  : undefined;
+              })()}
               onEditStoryboard={handleEditStoryboard}
             />
           )}
@@ -1409,6 +1575,12 @@ export default function App() {
                 }}
                 onRenameGroup={renameGroup}
                 onSortNodes={(direction) => sortGroupNodes(group.id, direction, nodes, setNodes)}
+                onCreateImage={groupNodes.filter(n => n.type === NodeType.IMAGE && Boolean(n.resultUrl)).length >= 2
+                  ? () => {
+                    const groupNodeIds = nodes.filter(n => n.groupId === group.id).map(n => n.id);
+                    handleImagesToImage(groupNodeIds);
+                  }
+                  : undefined}
                 onCreateVideo={() => {
                   // Pass group nodes directly to avoid selection state race conditions
                   const groupNodeIds = nodes.filter(n => n.groupId === group.id).map(n => n.id);
@@ -1459,6 +1631,7 @@ export default function App() {
         canUndo={canUndo}
         canRedo={canRedo}
         canvasTheme={canvasTheme}
+        sourceNodeType={nodes.find(n => n.id === contextMenu.sourceNodeId)?.type}
       />
 
       {/* Zoom Slider */}
@@ -1485,6 +1658,8 @@ export default function App() {
         imageUrl={editorModal.imageUrl}
         initialPrompt={nodes.find(n => n.id === editorModal.nodeId)?.prompt}
         initialModel={nodes.find(n => n.id === editorModal.nodeId)?.imageModel || 'gpt-image-2'}
+        initialStylePreset={nodes.find(n => n.id === editorModal.nodeId)?.stylePreset}
+        initialCharacterPreset={nodes.find(n => n.id === editorModal.nodeId)?.characterPreset}
         initialAspectRatio={nodes.find(n => n.id === editorModal.nodeId)?.aspectRatio || 'Auto'}
         initialResolution={nodes.find(n => n.id === editorModal.nodeId)?.resolution || '1K'}
         initialElements={nodes.find(n => n.id === editorModal.nodeId)?.editorElements as any}
@@ -1492,7 +1667,7 @@ export default function App() {
         initialCanvasSize={nodes.find(n => n.id === editorModal.nodeId)?.editorCanvasSize}
         initialBackgroundUrl={nodes.find(n => n.id === editorModal.nodeId)?.editorBackgroundUrl}
         onClose={handleCloseImageEditor}
-        onGenerate={async (sourceId, prompt, count) => {
+        onGenerate={async (sourceId, prompt, count, stylePreset, characterPreset) => {
           handleCloseImageEditor();
 
           const sourceNode = nodes.find(n => n.id === sourceId);
@@ -1500,6 +1675,8 @@ export default function App() {
 
           // Get settings from source node (which were updated by the modal)
           const imageModel = sourceNode.imageModel || 'gpt-image-2';
+          const stylePresetId = stylePreset || sourceNode.stylePreset;
+          const characterPresetId = characterPreset || sourceNode.characterPreset;
           const aspectRatio = sourceNode.aspectRatio || 'Auto';
           const resolution = sourceNode.resolution || '1K';
 
@@ -1515,7 +1692,7 @@ export default function App() {
           // Create N nodes with inherited settings
           for (let i = 0; i < count; i++) {
             newNodes.push({
-              id: crypto.randomUUID(),
+              id: createId(),
               type: NodeType.IMAGE,
               x: startX,
               y: startY + startYOffset + (i * yStep),
@@ -1523,6 +1700,8 @@ export default function App() {
               status: NodeStatus.LOADING,
               model: 'Banana Pro',
               imageModel: imageModel,
+              stylePreset: stylePresetId,
+              characterPreset: characterPresetId,
               aspectRatio: aspectRatio,
               resolution: resolution,
               parentIds: [sourceId]
@@ -1542,7 +1721,10 @@ export default function App() {
           newNodes.forEach(async (node) => {
             try {
               const resultUrl = await generateImage({
-                prompt: node.prompt || '',
+                prompt: composePromptWithCreativeStyle(
+                  composePromptWithCharacter(node.prompt || '', characterPresetId),
+                  stylePresetId
+                ),
                 imageBase64: imageBase64,
                 imageModel: imageModel,
                 aspectRatio: aspectRatio,

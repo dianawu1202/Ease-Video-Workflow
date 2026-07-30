@@ -17,6 +17,7 @@ interface SelectionBoundingBoxProps {
     onBoundingBoxPointerDown: (e: React.PointerEvent) => void;
     onRenameGroup?: (groupId: string, newLabel: string) => void;
     onSortNodes?: (direction: 'horizontal' | 'vertical' | 'grid') => void;
+    onCreateImage?: () => void;
     onCreateVideo?: () => void;
     onEditStoryboard?: (groupId: string) => void;
 }
@@ -145,6 +146,7 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
     onBoundingBoxPointerDown,
     onRenameGroup,
     onSortNodes,
+    onCreateImage,
     onCreateVideo,
     onEditStoryboard
 }) => {
@@ -296,6 +298,37 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                         transformOrigin: 'bottom right'
                     }}
                 >
+                    {onCreateImage && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onCreateImage();
+                            }}
+                            className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2.5 rounded flex items-center gap-2 transition-colors shadow-lg shadow-blue-600/20"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                                <circle cx="8.5" cy="8.5" r="1.5" />
+                                <path d="M21 15l-5-5L5 21" />
+                            </svg>
+                            Create Ref Image
+                        </button>
+                    )}
+                    {onCreateVideo && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onCreateVideo();
+                            }}
+                            className="bg-purple-600 hover:bg-purple-500 text-white text-sm px-4 py-2.5 rounded flex items-center gap-2 transition-colors shadow-lg shadow-purple-600/20"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M15 10l5 5-5 5" />
+                                <path d="M4 4v16" />
+                            </svg>
+                            Create Ref Video
+                        </button>
+                    )}
                     <button
                         onClick={onGroup}
                         className="bg-neutral-900 border border-neutral-700 hover:bg-neutral-800 text-white text-sm px-4 py-2.5 rounded flex items-center gap-2 transition-colors"
@@ -419,6 +452,22 @@ export const SelectionBoundingBox: React.FC<SelectionBoundingBoxProps> = ({
                     )}
 
                     {/* Create Video Button */}
+                    {onCreateImage && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onCreateImage();
+                            }}
+                            className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2.5 rounded flex items-center gap-2 transition-colors shadow-lg shadow-blue-600/20"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                                <circle cx="8.5" cy="8.5" r="1.5" />
+                                <path d="M21 15l-5-5L5 21" />
+                            </svg>
+                            Create Images
+                        </button>
+                    )}
                     <button
                         onClick={(e) => {
                             e.stopPropagation();

@@ -224,12 +224,19 @@ router.post('/generate-image', async (req, res) => {
 
 router.post('/generate-video', async (req, res) => {
     try {
-        const { nodeId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, motionReferenceUrl: rawMotionReferenceUrl, aspectRatio, resolution, duration, videoModel } = req.body;
+        const { nodeId, prompt, imageBase64: rawImageBase64, lastFrameBase64: rawLastFrameBase64, referenceImageBase64s: rawReferenceImageBase64s, motionReferenceUrl: rawMotionReferenceUrl, aspectRatio, resolution, duration, videoModel } = req.body;
         const { GEMINI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, HAILUO_API_KEY, KIE_API_KEY, VIDEOS_DIR } = req.app.locals;
 
         // Resolve file URLs to base64
         const imageBase64 = resolveImageToBase64(rawImageBase64);
         const lastFrameBase64 = resolveImageToBase64(rawLastFrameBase64);
+        const rawReferenceImages = Array.isArray(rawReferenceImageBase64s)
+            ? rawReferenceImageBase64s
+            : (rawReferenceImageBase64s ? [rawReferenceImageBase64s] : []);
+        const referenceImageBase64s = rawReferenceImages
+            .map(image => resolveImageToBase64(image))
+            .filter(Boolean)
+            .slice(0, 9);
         const motionReferenceUrl = resolveImageToBase64(rawMotionReferenceUrl);
 
         // Determine provider
@@ -251,6 +258,7 @@ router.post('/generate-video', async (req, res) => {
             console.log(`\n[Route] Seedance 2.0 Mini detected - routing to Kie`);
             console.log(`[Route] First frame: ${imageBase64 ? 'YES (' + Math.round(imageBase64.length / 1024) + ' KB)' : 'NO'}`);
             console.log(`[Route] Last frame: ${lastFrameBase64 ? 'YES (' + Math.round(lastFrameBase64.length / 1024) + ' KB)' : 'NO'}`);
+            console.log(`[Route] Reference images: ${referenceImageBase64s.length}`);
             console.log(`[Route] Reference video: ${motionReferenceUrl ? 'YES (' + Math.round(motionReferenceUrl.length / 1024) + ' KB)' : 'NO'}`);
             console.log(`[Route] Duration: ${duration || 5}s`);
             console.log(`[Route] Generate Audio: ${req.body.generateAudio !== false}`);
@@ -259,6 +267,7 @@ router.post('/generate-video', async (req, res) => {
                 prompt,
                 imageBase64,
                 lastFrameBase64,
+                referenceImageBase64s,
                 motionReferenceUrl,
                 aspectRatio,
                 resolution,

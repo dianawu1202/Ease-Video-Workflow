@@ -9,6 +9,9 @@ import React, { useRef, useEffect } from 'react';
 import { ChevronDown, Check, Banana, Image as ImageIcon, Crop, Monitor } from 'lucide-react';
 import { ImageModel, IMAGE_MODELS } from './imageEditor.types';
 import { OpenAIIcon, KlingIcon } from '../../icons/BrandIcons';
+import { CreativeStyleSelect } from '../../common/CreativeStyleSelect';
+import { CharacterLibrarySelect } from '../../common/CharacterLibrarySelect';
+import { removeCreativeStyleFromPrompt } from '../../../constants/creativeStyles';
 
 // ============================================================================
 // TYPES
@@ -21,6 +24,10 @@ interface PromptBarProps {
     // Model state
     selectedModel: string;
     onModelChange: (modelId: string) => void;
+    selectedStylePreset?: string;
+    onStylePresetChange: (stylePresetId: string) => void;
+    selectedCharacterPreset?: string;
+    onCharacterPresetChange: (characterPresetId: string) => void;
     showModelDropdown: boolean;
     setShowModelDropdown: (show: boolean) => void;
     // Aspect ratio state
@@ -51,6 +58,10 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     setPrompt,
     selectedModel,
     onModelChange,
+    selectedStylePreset,
+    onStylePresetChange,
+    selectedCharacterPreset,
+    onCharacterPresetChange,
     showModelDropdown,
     setShowModelDropdown,
     selectedAspectRatio,
@@ -76,6 +87,12 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     const availableModels = hasInputImage
         ? IMAGE_MODELS.filter(m => m.supportsImageToImage)
         : IMAGE_MODELS;
+
+    const handleStylePresetChange = (stylePreset: string) => {
+        const nextPrompt = removeCreativeStyleFromPrompt(prompt);
+        setPrompt(nextPrompt);
+        onStylePresetChange(stylePreset);
+    };
 
     // --- Effects ---
 
@@ -120,7 +137,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                 {showModelDropdown && (
                     <div className="absolute bottom-full mb-2 left-0 w-48 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50">
                         <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider bg-[#1a1a1a] border-b border-neutral-700">
-                            {hasInputImage ? 'Image → Image' : 'Text → Image'}
+                            {hasInputImage ? 'Image -> Image' : 'Text -> Image'}
                         </div>
                         {availableModels.filter(m => m.provider === 'openai').length > 0 && (
                             <>
@@ -197,6 +214,26 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
             {/* Right - Compact Controls Group */}
             <div className="flex items-center gap-1.5 flex-shrink-0">
+                <CreativeStyleSelect
+                    value={selectedStylePreset}
+                    onChange={handleStylePresetChange}
+                    isDark={true}
+                    placement="top"
+                    align="right"
+                    buttonClassName="flex items-center gap-1 text-[11px] font-medium bg-neutral-700/50 hover:bg-neutral-600 border border-neutral-600 text-white px-2 py-1.5 rounded-md transition-colors"
+                    maxLabelWidthClass="max-w-[56px]"
+                />
+
+                <CharacterLibrarySelect
+                    value={selectedCharacterPreset}
+                    onChange={onCharacterPresetChange}
+                    isDark={true}
+                    placement="top"
+                    align="right"
+                    buttonClassName="flex items-center gap-1 text-[11px] font-medium bg-neutral-700/50 hover:bg-neutral-600 border border-neutral-600 text-white px-2 py-1.5 rounded-md transition-colors"
+                    maxLabelWidthClass="max-w-[56px]"
+                />
+
                 {/* Aspect Ratio */}
                 <div className="relative" ref={aspectDropdownRef}>
                     <button
@@ -257,13 +294,13 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                         className="hover:text-white disabled:opacity-50"
                         onClick={() => setBatchCount(Math.max(1, batchCount - 1))}
                         disabled={batchCount <= 1}
-                    >‹</button>
+                    >-</button>
                     <span className="w-3 text-center">{batchCount}</span>
                     <button
                         className="hover:text-white disabled:opacity-50"
                         onClick={() => setBatchCount(Math.min(4, batchCount + 1))}
                         disabled={batchCount >= 4}
-                    >›</button>
+                    >+</button>
                 </div>
 
                 {/* Generate Button */}

@@ -10,6 +10,10 @@ import { NodeData, NodeType, NodeStatus } from '../types';
 import { generateImage, generateVideo } from '../services/generationService';
 import { generateLocalImage } from '../services/localModelService';
 import { extractVideoLastFrame } from '../utils/videoHelpers';
+import { createId } from '../utils/id';
+import { composePromptWithCreativeStyle } from '../constants/creativeStyles';
+import { composePromptWithCharacter } from '../constants/characterLibrary';
+import { composePromptWithCameraMove } from '../constants/cameraMoves';
 
 interface UseGenerationProps {
     nodes: NodeData[];
@@ -154,9 +158,14 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 .map(n => n!.prompt);
         };
 
-        // Combine prompts: TEXT node prompts + node's own prompt
+        // Combine prompts: TEXT node prompts + node's own prompt, then apply selected presets only for the API call.
         const textNodePrompts = getTextNodePrompts();
-        const combinedPrompt = [...textNodePrompts, node.prompt].filter(Boolean).join('\n\n');
+        const basePrompt = [...textNodePrompts, node.prompt].filter(Boolean).join('\n\n');
+        const characterPrompt = composePromptWithCharacter(basePrompt, node.characterPreset);
+        const stylePrompt = composePromptWithCreativeStyle(characterPrompt, node.stylePreset);
+        const combinedPrompt = (node.type === NodeType.VIDEO || node.type === NodeType.LOCAL_VIDEO_MODEL)
+            ? composePromptWithCameraMove(stylePrompt, node.cameraMovePreset)
+            : stylePrompt;
 
         // Check if prompt is required
         // For Kling frame-to-frame with both start and end frames, prompt is optional
@@ -176,7 +185,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
         }
 
         const controller = new AbortController();
-        const token = crypto.randomUUID();
+        const token = createId();
         const generationStartTime = Date.now();
         const timeoutMs = getGenerationTimeoutMs(node);
         const timeoutId = window.setTimeout(() => {
@@ -328,6 +337,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 // Get first parent image for video generation (start frame)
                 let imageBase64: string | undefined;
                 let lastFrameBase64: string | undefined;
+                let referenceImageBase64s: string[] | undefined;
 
                 // Separate visual parent nodes by media type so reference videos don't get treated as start frames.
                 const visualParentIds = node.parentIds?.filter(pid => {
@@ -342,6 +352,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 // Check for frame-to-frame mode (explicit or auto-detected from 2+ image parents)
                 const hasMultipleInputs = imageParentIds.length >= 2;
                 const hasExplicitFrameInputs = node.frameInputs && node.frameInputs.length >= 2;
+                const isMultiReference = node.videoMode === 'multi-reference';
 
                 // Video reference logic. Kling uses it for motion control; Seedance sends it as reference_video_urls.
                 let motionReferenceUrl: string | undefined;
@@ -359,9 +370,18 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                 }
 
                 // Only evaluate as frame-to-frame if NOT in motion control mode
-                const isFrameToFrame = !isMotionControl && (node.videoMode === 'frame-to-frame' || hasMultipleInputs || hasExplicitFrameInputs);
+                const isFrameToFrame = !isMotionControl && !isMultiReference && (node.videoMode === 'frame-to-frame' || hasMultipleInputs || hasExplicitFrameInputs);
 
-                if (isFrameToFrame && imageParentIds.length >= 2) {
+                if (isMultiReference && imageParentIds.length > 0) {
+                    referenceImageBase64s = imageParentIds
+                        .map(parentId => nodes.find(n => n.id === parentId)?.resultUrl)
+                        .filter((url): url is string => Boolean(url))
+                        .slice(0, 9);
+
+                    if (referenceImageBase64s.length === 0) {
+                        referenceImageBase64s = undefined;
+                    }
+                } else if (isFrameToFrame && imageParentIds.length >= 2) {
                     // Get start and end frames from frameInputs (if user reordered) or default order
                     const parent1 = nodes.find(n => n.id === imageParentIds[0]);
                     const parent2 = nodes.find(n => n.id === imageParentIds[1]);
@@ -415,6 +435,7 @@ export const useGeneration = ({ nodes, updateNode }: UseGenerationProps) => {
                     prompt: combinedPrompt,
                     imageBase64,
                     lastFrameBase64,
+                    referenceImageBase64s,
                     aspectRatio: node.aspectRatio,
                     resolution: node.resolution,
                     duration: node.videoDuration,

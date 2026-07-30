@@ -34,8 +34,16 @@ export const useContextMenuHandlers = ({
     // DOUBLE-CLICK & RIGHT-CLICK
     // ============================================================================
 
+    const isCanvasBlankTarget = (target: EventTarget | null) => {
+        const element = target as HTMLElement | null;
+        return Boolean(
+            element &&
+            (element.id === 'canvas-background' || element.closest('[data-canvas-background-hitbox="true"]'))
+        );
+    };
+
     const handleDoubleClick = useCallback((e: React.MouseEvent) => {
-        if ((e.target as HTMLElement).id === 'canvas-background') {
+        if (isCanvasBlankTarget(e.target)) {
             setContextMenu({
                 isOpen: true,
                 x: e.clientX,
@@ -47,7 +55,7 @@ export const useContextMenuHandlers = ({
 
     const handleGlobalContextMenu = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
-        if ((e.target as HTMLElement).id === 'canvas-background') {
+        if (isCanvasBlankTarget(e.target)) {
             setContextMenu({
                 isOpen: true,
                 x: e.clientX,
@@ -116,7 +124,7 @@ export const useContextMenuHandlers = ({
             isOpen: true,
             x: rect.right + 10,
             y: rect.top,
-            type: 'global'
+            type: 'add-nodes'
         });
     }, [setContextMenu]);
 

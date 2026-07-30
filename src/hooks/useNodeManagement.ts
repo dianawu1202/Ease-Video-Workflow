@@ -7,6 +7,8 @@
 
 import { useState } from 'react';
 import { NodeData, NodeType, NodeStatus, Viewport } from '../types';
+import { createId } from '../utils/id';
+import { canCreateConnectorNode, isCreatableNodeType } from '../utils/nodeActionRules';
 
 export const useNodeManagement = () => {
     // ============================================================================
@@ -19,6 +21,31 @@ export const useNodeManagement = () => {
     // ============================================================================
     // NODE OPERATIONS
     // ============================================================================
+
+    const getDefaultsForType = (type: NodeType): Partial<NodeData> => {
+        if (type === NodeType.IMAGE) {
+            return {
+                imageModel: 'gpt-image-2',
+                aspectRatio: '9:16',
+                resolution: '1K'
+            };
+        }
+
+        if (type === NodeType.VIDEO) {
+            return {
+                videoModel: 'seedance-2-0-mini',
+                videoMode: 'standard',
+                aspectRatio: '16:9',
+                resolution: '720p',
+                videoDuration: 5
+            };
+        }
+
+        return {
+            aspectRatio: 'Auto',
+            resolution: 'Auto'
+        };
+    };
 
     /**
      * Adds a new node to the canvas
@@ -35,22 +62,21 @@ export const useNodeManagement = () => {
         parentId: string | undefined,
         viewport: Viewport
     ) => {
+        if (!isCreatableNodeType(type)) return null;
+
         const canvasX = (x - viewport.x) / viewport.zoom;
         const canvasY = (y - viewport.y) / viewport.zoom;
 
         const newNode: NodeData = {
-            id: crypto.randomUUID(),
+            id: createId(),
             type,
             x: parentId ? canvasX : canvasX - 170,
             y: parentId ? canvasY : canvasY - 100,
             prompt: '',
             status: NodeStatus.IDLE,
             model: 'Banana Pro',
-            imageModel: type === NodeType.IMAGE ? 'gpt-image-2' : undefined,
-            videoModel: type === NodeType.VIDEO ? 'seedance-2-0-mini' : undefined,
-            aspectRatio: type === NodeType.IMAGE ? '9:16' : 'Auto',
-            resolution: type === NodeType.IMAGE ? '1K' : 'Auto',
-            parentIds: parentId ? [parentId] : []
+            parentIds: parentId ? [parentId] : [],
+            ...getDefaultsForType(type)
         };
 
         setNodes(prev => [...prev, newNode]);
@@ -112,11 +138,21 @@ export const useNodeManagement = () => {
             return;
         }
 
+        if (!isCreatableNodeType(type)) {
+            onCloseMenu();
+            return;
+        }
+
         if (contextMenu.type === 'node-connector' && contextMenu.sourceNodeId) {
             const sourceNode = nodes.find(n => n.id === contextMenu.sourceNodeId);
             if (sourceNode) {
                 const direction = contextMenu.connectorSide || 'right';
-                const newNodeId = crypto.randomUUID();
+                if (!canCreateConnectorNode(sourceNode.type, type, direction)) {
+                    onCloseMenu();
+                    return;
+                }
+
+                const newNodeId = createId();
                 const GAP = 100;
                 const NODE_WIDTH = 340;
 
@@ -132,11 +168,8 @@ export const useNodeManagement = () => {
                         prompt: '',
                         status: NodeStatus.IDLE,
                         model: 'Banana Pro',
-                        imageModel: type === NodeType.IMAGE ? 'gpt-image-2' : undefined,
-                        videoModel: type === NodeType.VIDEO ? 'seedance-2-0-mini' : undefined,
-                        aspectRatio: type === NodeType.IMAGE ? '9:16' : 'Auto',
-                        resolution: type === NodeType.IMAGE ? '1K' : 'Auto',
-                        parentIds: contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : []
+                        parentIds: contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : [],
+                        ...getDefaultsForType(type)
                     };
                 } else {
                     // Prepend: New -> Source
@@ -148,11 +181,8 @@ export const useNodeManagement = () => {
                         prompt: '',
                         status: NodeStatus.IDLE,
                         model: 'Banana Pro',
-                        imageModel: type === NodeType.IMAGE ? 'gpt-image-2' : undefined,
-                        videoModel: type === NodeType.VIDEO ? 'seedance-2-0-mini' : undefined,
-                        aspectRatio: type === NodeType.IMAGE ? '9:16' : 'Auto',
-                        resolution: type === NodeType.IMAGE ? '1K' : 'Auto',
-                        parentIds: []
+                        parentIds: [],
+                        ...getDefaultsForType(type)
                     };
                     // Update source to add new node as parent
                     const existingParentIds = sourceNode.parentIds || [];

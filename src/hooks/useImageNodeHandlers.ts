@@ -1,4 +1,4 @@
-/**
+﻿/**
  * useImageNodeHandlers.ts
  * 
  * Handles Image node menu actions.
@@ -7,6 +7,7 @@
 
 import React from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
+import { createId } from '../utils/id';
 
 // ============================================================================
 // TYPES
@@ -38,7 +39,7 @@ export const useImageNodeHandlers = ({
         if (!imageNode) return;
 
         // Create Image node to the right
-        const newNodeId = crypto.randomUUID();
+        const newNodeId = createId();
         const GAP = 100;
         const NODE_WIDTH = 340;
 
@@ -70,7 +71,7 @@ export const useImageNodeHandlers = ({
         if (!imageNode) return;
 
         // Create Video node to the right
-        const newNodeId = crypto.randomUUID();
+        const newNodeId = createId();
         const GAP = 100;
         const NODE_WIDTH = 340;
 
@@ -94,6 +95,138 @@ export const useImageNodeHandlers = ({
     };
 
     /**
+     * Handle multiple image references - creates or updates one Video node that
+     * uses every selected image as a Seedance reference image.
+     */
+    const handleImagesToImage = (nodeIds: string[]) => {
+        const orderedSelectedNodes = nodeIds
+            .map(id => nodes.find(n => n.id === id))
+            .filter((node): node is NodeData => Boolean(node));
+
+        const selectedImageNodes = orderedSelectedNodes.filter(
+            node => node.type === NodeType.IMAGE && Boolean(node.resultUrl)
+        );
+
+        if (selectedImageNodes.length < 2) return;
+
+        const selectedTargetImageNode = orderedSelectedNodes.find(
+            node => node.type === NodeType.IMAGE && !node.resultUrl
+        );
+
+        if (selectedTargetImageNode) {
+            setNodes(prev => prev.map(node => {
+                if (node.id !== selectedTargetImageNode.id) return node;
+
+                const existingParentIds = node.parentIds || [];
+                const nextParentIds = [
+                    ...existingParentIds,
+                    ...selectedImageNodes
+                        .map(imageNode => imageNode.id)
+                        .filter(imageId => imageId !== node.id && !existingParentIds.includes(imageId))
+                ];
+
+                return {
+                    ...node,
+                    parentIds: nextParentIds,
+                    imageModel: node.imageModel || 'gpt-image-2',
+                    aspectRatio: node.aspectRatio || '9:16',
+                    resolution: node.resolution || '1K'
+                };
+            }));
+            setSelectedNodeIds([selectedTargetImageNode.id]);
+            return;
+        }
+
+        const newNodeId = createId();
+        const GAP = 120;
+        const NODE_WIDTH = 365;
+        const minY = Math.min(...selectedImageNodes.map(node => node.y));
+        const maxX = Math.max(...selectedImageNodes.map(node => node.x + NODE_WIDTH));
+
+        const newImageNode: NodeData = {
+            id: newNodeId,
+            type: NodeType.IMAGE,
+            x: maxX + GAP,
+            y: minY,
+            prompt: '',
+            status: NodeStatus.IDLE,
+            model: 'Banana Pro',
+            imageModel: 'gpt-image-2',
+            aspectRatio: '9:16',
+            resolution: '1K',
+            parentIds: selectedImageNodes.map(node => node.id)
+        };
+
+        setNodes(prev => [...prev, newImageNode]);
+        setSelectedNodeIds([newNodeId]);
+    };
+
+    /**
+     * Handle multiple image references - creates or updates one Video node that
+     * uses every selected image as a Seedance reference image.
+     */
+    const handleImagesToVideo = (nodeIds: string[]) => {
+        const orderedSelectedNodes = nodeIds
+            .map(id => nodes.find(n => n.id === id))
+            .filter((node): node is NodeData => Boolean(node));
+
+        const selectedImageNodes = orderedSelectedNodes.filter(
+            node => node.type === NodeType.IMAGE && Boolean(node.resultUrl)
+        );
+
+        if (selectedImageNodes.length < 2) return;
+
+        const selectedVideoNode = orderedSelectedNodes.find(node => node.type === NodeType.VIDEO);
+
+        if (selectedVideoNode) {
+            setNodes(prev => prev.map(node => {
+                if (node.id !== selectedVideoNode.id) return node;
+
+                const existingParentIds = node.parentIds || [];
+                const nextParentIds = [
+                    ...existingParentIds,
+                    ...selectedImageNodes
+                        .map(imageNode => imageNode.id)
+                        .filter(imageId => !existingParentIds.includes(imageId))
+                ];
+
+                return {
+                    ...node,
+                    parentIds: nextParentIds,
+                    videoMode: 'multi-reference',
+                    frameInputs: undefined
+                };
+            }));
+            setSelectedNodeIds([selectedVideoNode.id]);
+            return;
+        }
+
+        const newNodeId = createId();
+        const GAP = 120;
+        const NODE_WIDTH = 365;
+        const minY = Math.min(...selectedImageNodes.map(node => node.y));
+        const maxX = Math.max(...selectedImageNodes.map(node => node.x + NODE_WIDTH));
+
+        const newVideoNode: NodeData = {
+            id: newNodeId,
+            type: NodeType.VIDEO,
+            x: maxX + GAP,
+            y: minY,
+            prompt: '',
+            status: NodeStatus.IDLE,
+            model: 'Banana Pro',
+            videoModel: 'seedance-2-0-mini',
+            videoMode: 'multi-reference',
+            aspectRatio: 'Auto',
+            resolution: 'Auto',
+            parentIds: selectedImageNodes.map(node => node.id)
+        };
+
+        setNodes(prev => [...prev, newVideoNode]);
+        setSelectedNodeIds([newNodeId]);
+    };
+
+    /**
      * Create a character turnaround sheet from the current image.
      * Uses the source image as a visual reference and auto-starts generation.
      */
@@ -101,7 +234,7 @@ export const useImageNodeHandlers = ({
         const imageNode = nodes.find(n => n.id === nodeId);
         if (!imageNode?.resultUrl) return;
 
-        const newNodeId = crypto.randomUUID();
+        const newNodeId = createId();
         const GAP = 100;
         const NODE_WIDTH = 365;
 
@@ -123,7 +256,7 @@ export const useImageNodeHandlers = ({
             imageModel: 'gpt-image-2',
             aspectRatio: '16:9',
             resolution: '1K',
-            title: '角色三视图',
+            title: '\u89d2\u8272\u4e09\u89c6\u56fe',
             parentIds: [nodeId]
         };
 
@@ -135,6 +268,9 @@ export const useImageNodeHandlers = ({
     return {
         handleImageToImage,
         handleImageToVideo,
+        handleImagesToImage,
+        handleImagesToVideo,
         handleMakeCharacterTurnaround
     };
 };
+

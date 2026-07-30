@@ -7,11 +7,14 @@
  */
 
 import React, { useState, useRef, useEffect, memo } from 'react';
-import { Sparkles, Banana, Settings2, Check, ChevronDown, ChevronUp, GripVertical, Image as ImageIcon, Film, Clock, Expand, Shrink, Monitor, Crop, HardDrive } from 'lucide-react';
+import { Sparkles, Banana, Settings2, Check, ChevronDown, ChevronUp, GripVertical, Image as ImageIcon, ImagePlus, Film, Clock, Expand, Shrink, Monitor, Crop, HardDrive } from 'lucide-react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { OpenAIIcon, GoogleIcon, KlingIcon, HailuoIcon } from '../icons/BrandIcons';
 import { useFaceDetection } from '../../hooks/useFaceDetection';
 import { LocalModel, getLocalModels } from '../../services/localModelService';
+import { CreativeStyleSelect } from '../common/CreativeStyleSelect';
+import { CharacterLibrarySelect } from '../common/CharacterLibrarySelect';
+import { removeCreativeStyleFromPrompt } from '../../constants/creativeStyles';
 
 interface NodeControlsProps {
     data: NodeData;
@@ -22,6 +25,8 @@ interface NodeControlsProps {
     onUpdate: (id: string, updates: Partial<NodeData>) => void;
     onGenerate: (id: string) => void;
     onSelect: (id: string) => void;
+    onStartReferencePick?: (id: string) => void;
+    isPickingReference?: boolean;
     zoom: number;
     canvasTheme?: 'dark' | 'light';
 }
@@ -139,13 +144,13 @@ function buildAnglePrompt(
     // Rotation (horizontal)
     if (settings.rotation !== 0) {
         const direction = settings.rotation > 0 ? 'right' : 'left';
-        parts.push(`The camera has rotated ${Math.abs(settings.rotation)}° to the ${direction}.`);
+        parts.push(`The camera has rotated ${Math.abs(settings.rotation)}\u00b0 to the ${direction}.`);
     }
 
     // Tilt (vertical)
     if (settings.tilt !== 0) {
         const direction = settings.tilt > 0 ? 'upward' : 'downward';
-        parts.push(`The camera has tilted ${Math.abs(settings.tilt)}° ${direction}.`);
+        parts.push(`The camera has tilted ${Math.abs(settings.tilt)}\u00b0 ${direction}.`);
     }
 
     // Scale
@@ -179,6 +184,8 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     onUpdate,
     onGenerate,
     onSelect,
+    onStartReferencePick,
+    isPickingReference = false,
     zoom,
     canvasTheme = 'dark'
 }) => {
@@ -318,6 +325,18 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
         }, 300); // 300ms debounce - increased for smoother typing
     };
 
+    const handleStylePresetChange = (stylePreset: string) => {
+        const nextPrompt = removeCreativeStyleFromPrompt(localPrompt);
+
+        if (updateTimeoutRef.current) {
+            clearTimeout(updateTimeoutRef.current);
+        }
+
+        setLocalPrompt(nextPrompt);
+        lastSentPromptRef.current = nextPrompt;
+        onUpdate(data.id, { stylePreset, prompt: nextPrompt });
+    };
+
     const handleSizeSelect = (value: string) => {
         if (data.type === NodeType.VIDEO) {
             onUpdate(data.id, { resolution: value });
@@ -375,6 +394,8 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const isVideoNode = data.type === NodeType.VIDEO || data.type === NodeType.LOCAL_VIDEO_MODEL;
     const isImageNode = data.type === NodeType.IMAGE || data.type === NodeType.LOCAL_IMAGE_MODEL;
     const hasConnectedImages = connectedImageNodes.length > 0;
+    const connectedReferenceInputs = connectedImageNodes.filter(node => Boolean(node.url) && node.type !== NodeType.TEXT);
+    const shouldShowImageReferenceStrip = isImageNode;
 
     // Video model selection logic
     const currentVideoModel = VIDEO_MODELS.find(m => m.id === data.videoModel) || VIDEO_MODELS[0];
@@ -614,6 +635,51 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                 </div>
             )}
 
+            {shouldShowImageReferenceStrip && (
+                <div className="mb-3 flex min-h-[64px] items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onStartReferencePick?.(data.id);
+                        }}
+                        className={`flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl border border-dashed text-[11px] font-medium transition-colors ${isPickingReference
+                            ? 'border-blue-400 bg-blue-500/15 text-blue-300'
+                            : isDark ? 'border-neutral-700 bg-[#1d1d1d] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200' : 'border-neutral-300 bg-neutral-50 text-neutral-500 hover:border-neutral-400 hover:text-neutral-900'
+                            }`}
+                        title={'\u4ece\u753b\u5e03\u9009\u62e9\u53c2\u8003\u56fe\u7247'}
+                    >
+                        <ImagePlus size={18} />
+                        <span className="mt-1">{'\u53c2\u8003'}</span>
+                    </button>
+
+                    {connectedReferenceInputs.length > 0 ? (
+                        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1">
+                            {connectedReferenceInputs.map((node, index) => (
+                                <div
+                                    key={`${node.id}-${index}`}
+                                    className={`relative h-14 w-20 shrink-0 overflow-hidden rounded-xl border ${isDark ? 'border-neutral-700 bg-neutral-900' : 'border-neutral-200 bg-neutral-100'}`}
+                                    title={node.type === NodeType.VIDEO ? '\u89c6\u9891\u5e27\u53c2\u8003' : '\u56fe\u7247\u53c2\u8003'}
+                                >
+                                    {node.type === NodeType.VIDEO ? (
+                                        <video src={node.url} className="h-full w-full object-cover" muted />
+                                    ) : (
+                                        <img src={node.url} alt="Reference asset" className="h-full w-full object-cover" />
+                                    )}
+                                    <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                        {node.type === NodeType.VIDEO ? '\u89c6\u9891\u5e27' : '\u56fe\u7247'}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className={`text-xs ${isDark ? 'text-neutral-500' : 'text-neutral-500'}`}>
+                            {'\u70b9\u51fb\u201c\u53c2\u8003\u201d\uff0c\u518d\u5728\u753b\u5e03\u4e0a\u9009\u62e9\u56fe\u7247\u8d44\u6e90'}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {data.errorMessage && (
                 <div className="text-red-400 text-xs mb-2 p-1 bg-red-900/20 rounded border border-red-900/50">
                     {data.errorMessage}
@@ -714,8 +780,8 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                                 videoGenerationMode === 'image-to-video' ? 'bg-green-400' :
                                                     videoGenerationMode === 'motion-control' ? 'bg-orange-400' : 'bg-purple-400'
                                                 }`} />
-                                            {videoGenerationMode === 'text-to-video' ? 'Text → Video' :
-                                                videoGenerationMode === 'image-to-video' ? 'Image → Video' :
+                                            {videoGenerationMode === 'text-to-video' ? 'Text -> Video' :
+                                                videoGenerationMode === 'image-to-video' ? 'Image -> Video' :
                                                     videoGenerationMode === 'motion-control' ? 'Motion Control' :
                                                         'Frame-to-Frame'}
                                         </div>
@@ -851,9 +917,9 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                             <span className={`w-1.5 h-1.5 rounded-full ${imageGenerationMode === 'text-to-image' ? 'bg-blue-400' :
                                                 imageGenerationMode === 'image-to-image' ? 'bg-green-400' : 'bg-purple-400'
                                                 }`} />
-                                            {imageGenerationMode === 'text-to-image' ? 'Text → Image' :
-                                                imageGenerationMode === 'image-to-image' ? `Image → Image` :
-                                                    `${inputCount} Images → Image`}
+                                            {imageGenerationMode === 'text-to-image' ? 'Text -> Image' :
+                                                imageGenerationMode === 'image-to-image' ? `Image -> Image` :
+                                                    `${inputCount} Images -> Image`}
                                         </div>
                                         {/* OpenAI Models */}
                                         {availableImageModels.filter(m => m.provider === 'openai').length > 0 && (
@@ -939,6 +1005,26 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2">
+                        <CreativeStyleSelect
+                            value={data.stylePreset}
+                            onChange={handleStylePresetChange}
+                            isDark={isDark}
+                            placement="top"
+                            align="right"
+                            buttonClassName="flex items-center gap-1.5 text-xs font-medium bg-[#252525] hover:bg-[#333] border border-neutral-700 text-white px-2.5 py-1.5 rounded-lg transition-colors"
+                            maxLabelWidthClass="max-w-[58px]"
+                        />
+
+                        <CharacterLibrarySelect
+                            value={data.characterPreset}
+                            onChange={(characterPreset) => onUpdate(data.id, { characterPreset })}
+                            isDark={isDark}
+                            placement="top"
+                            align="right"
+                            buttonClassName="flex items-center gap-1.5 text-xs font-medium bg-[#252525] hover:bg-[#333] border border-neutral-700 text-white px-2.5 py-1.5 rounded-lg transition-colors"
+                            maxLabelWidthClass="max-w-[58px]"
+                        />
+
                         {/* Unified Size/Ratio Dropdown (hidden for video nodes in motion-control mode) */}
                         {!(isVideoNode && videoGenerationMode === 'motion-control') && (
                             <div className="relative" ref={dropdownRef}>

@@ -7,6 +7,7 @@
 
 import { useState } from 'react';
 import { NodeGroup, NodeData } from '../types';
+import { createId } from '../utils/id';
 
 export const useGroupManagement = () => {
     // ============================================================================
@@ -31,7 +32,7 @@ export const useGroupManagement = () => {
         onUpdateNodes: (updater: (prev: NodeData[]) => NodeData[]) => void,
         label: string = 'New Group'
     ): string => {
-        const groupId = crypto.randomUUID();
+        const groupId = createId();
 
         const newGroup: NodeGroup = {
             id: groupId,

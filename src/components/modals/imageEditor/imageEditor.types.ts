@@ -59,6 +59,8 @@ export interface ImageEditorModalProps {
     imageUrl?: string;
     initialPrompt?: string;
     initialModel?: string;
+    initialStylePreset?: string;
+    initialCharacterPreset?: string;
     initialAspectRatio?: string;
     initialResolution?: string;
     initialElements?: EditorElement[];
@@ -66,7 +68,7 @@ export interface ImageEditorModalProps {
     initialCanvasSize?: { width: number; height: number };
     initialBackgroundUrl?: string; // Original/clean image for editing
     onClose: () => void;
-    onGenerate: (id: string, prompt: string, count: number) => void;
+    onGenerate: (id: string, prompt: string, count: number, stylePreset?: string, characterPreset?: string) => void;
     onUpdate: (id: string, updates: any) => void;
 }
 

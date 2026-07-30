@@ -664,6 +664,7 @@ export async function generateKieSeedanceVideo({
     prompt,
     imageBase64,
     lastFrameBase64,
+    referenceImageBase64s,
     motionReferenceUrl,
     aspectRatio,
     resolution,
@@ -675,6 +676,9 @@ export async function generateKieSeedanceVideo({
 
     const model = 'bytedance/seedance-2-mini';
     const hasFrameInput = Boolean(imageBase64 || lastFrameBase64);
+    const referenceImages = Array.isArray(referenceImageBase64s)
+        ? referenceImageBase64s.filter(Boolean).slice(0, 9)
+        : [];
     const input = {
         prompt,
         generate_audio: generateAudio !== false,
@@ -694,8 +698,16 @@ export async function generateKieSeedanceVideo({
         input.last_frame_url = await uploadDataUrlToKie(lastFrameBase64, apiKey, 'seedance_2_mini_last_frame');
     }
 
+    if (referenceImages.length > 0) {
+        input.reference_image_urls = await Promise.all(
+            referenceImages.map((referenceImage, index) =>
+                uploadDataUrlToKie(referenceImage, apiKey, `seedance_2_mini_reference_image_${index + 1}`)
+            )
+        );
+    }
+
     // Kie's Seedance reference-video mode is mutually exclusive with first/last frame inputs.
-    if (!hasFrameInput && motionReferenceUrl) {
+    if (!hasFrameInput && referenceImages.length === 0 && motionReferenceUrl) {
         input.reference_video_urls = [
             await uploadDataUrlToKie(motionReferenceUrl, apiKey, 'seedance_2_mini_reference_video')
         ];

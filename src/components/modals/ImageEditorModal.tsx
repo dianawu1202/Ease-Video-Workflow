@@ -22,6 +22,8 @@ import { uploadAsset } from '../../services/assetService';
 import { useImageEditorSelection } from '../../hooks/useImageEditorSelection';
 import { useImageEditorText } from '../../hooks/useImageEditorText';
 import { useImageEditorCrop } from '../../hooks/useImageEditorCrop';
+import { NO_STYLE_PRESET_ID } from '../../constants/creativeStyles';
+import { NO_CHARACTER_PRESET_ID } from '../../constants/characterLibrary';
 
 // Sub-components
 import { DrawingToolbar } from './imageEditor/DrawingToolbar';
@@ -38,6 +40,8 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     imageUrl,
     initialPrompt,
     initialModel,
+    initialStylePreset,
+    initialCharacterPreset,
     initialAspectRatio,
     initialResolution,
     initialElements,
@@ -56,6 +60,8 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
     // --- Model State ---
     const [selectedModel, setSelectedModel] = useState(initialModel || 'gpt-image-2');
+    const [selectedStylePreset, setSelectedStylePreset] = useState(initialStylePreset || NO_STYLE_PRESET_ID);
+    const [selectedCharacterPreset, setSelectedCharacterPreset] = useState(initialCharacterPreset || NO_CHARACTER_PRESET_ID);
     const [selectedAspectRatio, setSelectedAspectRatio] = useState(initialAspectRatio || 'Auto');
     const [selectedResolution, setSelectedResolution] = useState(initialResolution || '1K');
 
@@ -412,10 +418,12 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         onUpdate(nodeId, {
             prompt,
             imageModel: selectedModel,
+            stylePreset: selectedStylePreset,
+            characterPreset: selectedCharacterPreset,
             aspectRatio: selectedAspectRatio,
             resolution: selectedResolution
         });
-        onGenerate(nodeId, prompt, batchCount);
+        onGenerate(nodeId, prompt, batchCount, selectedStylePreset, selectedCharacterPreset);
     };
 
     const handleModelChange = (modelId: string) => {
@@ -440,6 +448,16 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         setSelectedResolution(res);
         onUpdate(nodeId, { resolution: res });
         setShowResolutionDropdown(false);
+    };
+
+    const handleStylePresetChange = (stylePreset: string) => {
+        setSelectedStylePreset(stylePreset);
+        onUpdate(nodeId, { stylePreset });
+    };
+
+    const handleCharacterPresetChange = (characterPreset: string) => {
+        setSelectedCharacterPreset(characterPreset);
+        onUpdate(nodeId, { characterPreset });
     };
 
     // --- Early Return ---
@@ -847,6 +865,10 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                     setPrompt={setPrompt}
                     selectedModel={selectedModel}
                     onModelChange={handleModelChange}
+                    selectedStylePreset={selectedStylePreset}
+                    onStylePresetChange={handleStylePresetChange}
+                    selectedCharacterPreset={selectedCharacterPreset}
+                    onCharacterPresetChange={handleCharacterPresetChange}
                     showModelDropdown={showModelDropdown}
                     setShowModelDropdown={setShowModelDropdown}
                     selectedAspectRatio={selectedAspectRatio}

@@ -39,10 +39,11 @@ export interface NodeData {
   linkedVideoNodeId?: string; // For Text nodes: linked video node for prompt sync
 
   // Video node specific
-  videoMode?: 'standard' | 'frame-to-frame' | 'motion-control'; // Video generation mode
+  videoMode?: 'standard' | 'frame-to-frame' | 'motion-control' | 'multi-reference'; // Video generation mode
   frameInputs?: { nodeId: string; order: 'start' | 'end' }[]; // For frame-to-frame: connected image nodes
   videoModel?: string; // Video model version (e.g., 'veo-3.1', 'kling-v2-1')
   videoDuration?: number; // Video duration in seconds (e.g., 5, 6, 8, 10)
+  cameraMovePreset?: string; // Camera movement preset applied at video generation time
   generateAudio?: boolean; // Whether to generate native audio (Kling 2.6, Veo 3.1)
   inputUrl?: string; // Input URL for video generation (image-to-video)
 
@@ -53,6 +54,8 @@ export interface NodeData {
   // Settings
   model: string;
   imageModel?: string; // Image model version (e.g., 'gemini-pro', 'kling-v2')
+  stylePreset?: string; // Creative visual style preset applied at generation time
+  characterPreset?: string; // Character library preset applied at generation time
   aspectRatio: string;
   resolution: string;
   isPromptExpanded?: boolean; // Whether the prompt editing area is expanded

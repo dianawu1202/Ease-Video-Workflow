@@ -7,6 +7,7 @@
 
 import { useState, useCallback } from 'react';
 import { NodeData, NodeStatus, NodeType, Viewport } from '../types';
+import { createId } from '../utils/id';
 
 // ============================================================================
 // TYPES
@@ -410,7 +411,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
             .map(c => c.url);
 
         // Generate a shared group ID for all storyboard nodes
-        const storyboardGroupId = crypto.randomUUID();
+        const storyboardGroupId = createId();
 
         // Create nodes for each script - use composite image as reference
         const newNodes: Partial<NodeData>[] = state.scripts.map((script, index) => {
@@ -427,7 +428,7 @@ export const useStoryboardGenerator = ({ onCreateNodes, viewport }: UseStoryboar
                 : characterImageUrls.length > 0 ? characterImageUrls : undefined;
 
             return {
-                id: crypto.randomUUID(),
+                id: createId(),
                 type: NodeType.IMAGE,
                 x: startX + index * (NODE_WIDTH + NODE_GAP),
                 y: centerY - 100,

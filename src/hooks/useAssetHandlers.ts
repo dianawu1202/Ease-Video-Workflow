@@ -8,6 +8,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { NodeData, NodeType, NodeStatus, Viewport, ContextMenuState } from '../types';
+import { createId } from '../utils/id';
 
 interface UseAssetHandlersOptions {
     nodes: NodeData[];
@@ -176,7 +177,7 @@ export const useAssetHandlers = ({
         if (!nodeToSnapshot?.resultUrl) return;
 
         try {
-            const response = await fetch('http://localhost:3001/api/library', {
+            const response = await fetch('/api/library', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -268,7 +269,7 @@ export const useAssetHandlers = ({
                     }
 
                     const newNode: NodeData = {
-                        id: crypto.randomUUID(),
+                        id: createId(),
                         type: isVideo ? NodeType.VIDEO : NodeType.IMAGE,
                         x: canvasX,
                         y: canvasY,
